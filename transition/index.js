@@ -55,7 +55,7 @@ function start(ctx, width, height) {
 	editor.constraint('color', { min: 0, max: 255, step: 1 })
 	editor.constraint('angle', { min: 0, max: 2, decimals: 0 })
 
-	require('./transform')(animations, require('./scheme'))
+	require('../animation-scheme')(animations, require('./scheme'))
 	animations.forEach(function(a) {
 		editor.add(a.timeline, a.name)
 	})

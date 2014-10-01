@@ -1,4 +1,45 @@
 (function e(t,n,r){function s(o,u){if(!n[o]){if(!t[o]){var a=typeof require=="function"&&require;if(!u&&a)return a(o,!0);if(i)return i(o,!0);throw new Error("Cannot find module '"+o+"'")}var f=n[o]={exports:{}};t[o][0].call(f.exports,function(e){var n=t[o][1][e];return s(n?n:e)},f,f.exports,e,t,n,r)}return n[o].exports}var i=typeof require=="function"&&require;for(var o=0;o<r.length;o++)s(r[o]);return s})({1:[function(require,module,exports){
+var createTimeline = require('keytime')
+var indexOf = require('indexof-property')('name')
+
+function fit(timeline, timelineScheme) {
+	timelineScheme.forEach(function(scheme) {
+		var prop = timeline.property(scheme.name)
+		if (!prop) {
+			timeline.addProperty(scheme)
+		}
+	})
+
+
+}
+
+//transforms raw JSON to a list of timelines
+module.exports = function(data, scheme) {
+	scheme = scheme||[]
+
+	//from the JSON data we need to build keytime objects
+	data.forEach(function(a) {
+		var timeline = createTimeline(a.timeline)
+		a.timeline = timeline
+
+		var idx = indexOf(scheme, a.name)
+		if (idx !== -1) {
+			fit(a.timeline, scheme[idx].timeline)
+		}
+	})
+
+	//now add any remainders
+	scheme.forEach(function(a) {
+		var idx = indexOf(data, a.name)
+		if (idx === -1) {
+			var t = createTimeline(a.timeline)
+			data.push({ name: a.name, timeline: t })
+		}
+	})
+}
+
+
+},{"indexof-property":162,"keytime":265}],2:[function(require,module,exports){
 var number = require('as-number')
 var mixes = require('mixes')
 
@@ -62,10 +103,10 @@ mixes(Reaction, {
 })
 
 module.exports = Reaction
-},{"as-number":6,"mixes":161}],2:[function(require,module,exports){
+},{"as-number":9,"mixes":303}],3:[function(require,module,exports){
 var Analyse = require('web-audio-analyser')
 var Reaction = require('./')
-
+var events = require('dom-events')
 
 var noop = function(){}
 
@@ -78,11 +119,11 @@ module.exports = function(opt, callback) {
 			return
 		}
 		var audio = new Audio()
-		audio.addEventListener('error', function(e) {
+		events.once(audio, 'error', function(e) {
 			callback(e)
 			callback = noop
 		})
-		audio.addEventListener('canplay', function() {
+		events.once(audio, 'canplay', function() {
 			audio.play()
 			analyser = Analyse(audio, opt)
 			reaction = Reaction(opt)
@@ -90,15 +131,38 @@ module.exports = function(opt, callback) {
 				var frequencies = analyser.frequencies()
 				reaction.update(frequencies)
 				return reaction
-			})
+			}, audio, analyser)
 			callback = noop
 		})
 		audio.src = url
 		audio.loop = opt.loop
 	})
 }
-},{"./":1,"soundcloud-badge":173,"web-audio-analyser":187}],3:[function(require,module,exports){
-require('canvas-testbed')(render, start, { context: 'webgl' })
+},{"./":2,"dom-events":30,"soundcloud-badge":315,"web-audio-analyser":329}],4:[function(require,module,exports){
+module.exports=[{"name":"innerSphere","timeline":[{"name":"rotation","type":"array","value":[0,3.8250000000000006,0],"keyframes":[{"time":0.59,"value":[0,3.8250000000000006,0]},{"time":1.19,"value":[0.5750000000000001,0,0.8],"ease":"circIn"},{"time":1.97,"value":[0,-5.283185307179586,0],"ease":"circOut"}]},{"name":"scale","type":"array","value":0,"keyframes":[{"time":0.42,"value":0},{"time":0.84,"value":1,"ease":"expoOut"},{"time":1.08,"value":1.45},{"time":1.56,"value":1,"ease":"circOut"}]},{"name":"audio","type":"array","value":1,"keyframes":[{"time":0,"value":0},{"time":0.83,"value":0},{"time":1.356,"value":0},{"time":2.91,"value":0.42499999999999993,"ease":"circOut"},{"time":3.2099999999999964,"value":0.614144736842104},{"time":3.8219999999999943,"value":1}]}]},{"name":"outerSphere","timeline":[{"name":"rotation","type":"array","value":[0,0,0],"keyframes":[]},{"name":"scale","type":"array","value":0,"keyframes":[{"time":0.78,"value":0},{"time":1.91,"value":0},{"time":2.27,"value":1.475,"ease":"quartOut"},{"time":2.94,"value":1,"ease":"quartInOut"}]},{"name":"audio","type":"array","value":1,"keyframes":[{"time":2.41,"value":0},{"time":4.07,"value":0.44999999999999996},{"time":5.74,"value":1}]}]}] 
+},{}],5:[function(require,module,exports){
+module.exports = [
+	{
+		name: 'innerSphere',
+		timeline: [
+			{ name: 'rotation', value: [0, 0, 0] },
+			{ name: 'scale', value: 1 },
+			{ name: 'audio', value: 1 }
+		]
+	},
+	{
+		name: 'outerSphere',
+		timeline: [
+			{ name: 'rotation', value: [0, 0, 0] },
+			{ name: 'scale', value: 1 },
+			{ name: 'audio', value: 1 }			
+		]
+	}
+]
+},{}],6:[function(require,module,exports){
+require('canvas-testbed')(render, start, {
+    context: 'webgl'
+})
 
 var Vignette = require('gl-vignette-background')
 var Sphere = require('./spinning-sphere')
@@ -109,48 +173,63 @@ var AudioViz = require('../audio-react/visualize')
 
 var lerp = require('lerp')
 
-var bg, sphere, particles, audioReact
+var bg,
+    sphere,
+    particles,
+    audioReact,
+    animations = {},
+    audioNode,
+    editor
+
+
 var time = 0
 
 function render(gl, width, height, dt) {
     time += dt
-	gl.clear(gl.COLOR_BUFFER_BIT)
-	gl.clearColor(0,0,0,1)
-	
-	bg.draw()
+    gl.clear(gl.COLOR_BUFFER_BIT)
+    gl.clearColor(0, 0, 0, 1)
 
-
+    bg.draw()
 
     particles.draw(width, height, dt)
 
     if (audioReact) {
         var reaction = audioReact()
 
-        var s1 = lerp(0.5, 1.0, reaction.value(0)),
-            s2 = lerp(0.5, 1.0, reaction.value(reaction.count-1))
-        sphere.innerScale = [s1,s1,s1]
-        sphere.outerScale = [s2,s2,s2]
-        sphere.draw(width, height, dt)
+        var innerAmt = animations.innerSphere.audio,
+            outerAmt = animations.outerSphere.audio
 
-        var s3 = lerp(0.5, 4, reaction.value(reaction.count-1))
+        var innerScale = lerp(0.5, 1.0, reaction.value(0) * innerAmt),
+            outerScale = lerp(0.5, 1.0, reaction.value(reaction.count - 1) * outerAmt),
+            s3 = lerp(0.5, 4, reaction.value(reaction.count - 1))
+
+        innerScale *= animations.innerSphere.scale
+        outerScale *= animations.outerSphere.scale
+
+        sphere.innerScale = [innerScale, innerScale, innerScale]
+        sphere.outerScale = [outerScale, outerScale, outerScale]
+
         particles.scale = s3
+
+        sphere.innerRotation = animations.innerSphere.rotation
+        sphere.draw(width, height, dt)
     }
 }
 
 function start(gl, width, height) {
-	var radius = Math.max(width, height) * 0.6
-	bg = Vignette(gl, {
-        scale: [ 1/width * radius, 1/height * radius],
+    var radius = Math.max(width, height) * 0.6
+    bg = Vignette(gl, {
+        scale: [1 / width * radius, 1 / height * radius],
         aspect: 1,
         color2: [0, 0, 0],
-        color1: [30/255, 46/255, 58/255],
-        smoothing: [ -0.5, 1.0 ],
+        color1: [30 / 255, 46 / 255, 58 / 255],
+        smoothing: [-0.5, 1.0],
         noiseAlpha: 0.2,
     })
 
     var basicShader = BasicShader(gl)
 
-	sphere = Sphere(gl, {
+    sphere = Sphere(gl, {
         shader: basicShader
     })
 
@@ -159,7 +238,7 @@ function start(gl, width, height) {
         noiseScale: 0.5,
         speed: 0.3,
         driftSpeed: 0.03,
-        width: width, 
+        width: width,
         height: height
     })
 
@@ -175,20 +254,74 @@ function start(gl, width, height) {
         dark: false,
         getFonts: true,
         audible: true,
-        stereo: false   
-    }, function(err, react) {
+        loop: false,
+        stereo: false
+    }, function(err, react, audio, analyser) {
         if (err) {
             sphere.scale = [1, 1, 1]
             particles.scale = 1
-        } else 
+        } else {
             audioReact = react
+            audioNode = audio
+            editor.duration = audio.duration
+        }
+        editor.run()
+        // editor.show()
     })
+
+
+    ensureScheme(animData, require('./anim'))
+    update(0)
+    setupEditor()
 }
 
 events.on(window, 'touchstart', function(ev) {
     ev.preventDefault()
 })
-},{"../audio-react/visualize":2,"./particles":4,"./spinning-sphere":5,"canvas-testbed":12,"dom-events":27,"gl-basic-shader":31,"gl-vignette-background":108,"lerp":160}],4:[function(require,module,exports){
+
+
+var createEditor = require('keytime-basic-editor')
+var createTimeline = require('keytime')
+var animData = require('./anim-data.json')
+var ensureScheme = require('../animation-scheme')
+
+function setupEditor() {
+    editor = createEditor(update, {
+        // duration: 233
+    })
+
+    // editor.shy('color')
+    editor.constraint(['rotation'], { min: -Math.PI*2, max: Math.PI*2, step: 0.05, decimals: 2 })
+    editor.constraint(['scale'], { min: 0, max: 4, step: 0.05, decimals: 2 })
+    editor.constraint(['audio'], { min: 0, max: 1, step: 0.05, decimals: 2 })
+    editor.constraint('color', { min: 0, max: 255, step: 1 })
+    editor.constraint('angle', { min: 0, max: 2, decimals: 0 })
+
+    animData.forEach(function(a) {
+        editor.add(a.timeline, a.name)
+    })
+
+    editor.on('play', function() {
+        audioNode.currentTime = editor.playhead()
+        audioNode.play()
+    })
+    editor.on('pause', function() {
+        audioNode.pause()
+    })
+
+    editor.appendTo(document.body)
+    editor.hide()
+}
+
+function update(time) {
+    animData.forEach(function(a) {
+        if (!animations[a.name])
+            animations[a.name] = {}
+        a.timeline.values(time, animations[a.name])
+    })
+}
+
+},{"../animation-scheme":1,"../audio-react/visualize":3,"./anim":5,"./anim-data.json":4,"./particles":7,"./spinning-sphere":8,"canvas-testbed":15,"dom-events":30,"gl-basic-shader":34,"gl-vignette-background":111,"keytime":265,"keytime-basic-editor":168,"lerp":302}],7:[function(require,module,exports){
 var Base = require("../particles");
 var inherits = require("inherits");
 var Batch = require("gl-quad-batch");
@@ -240,7 +373,7 @@ Particles.prototype.draw = function(width, height, dt) {
     this.batch.draw();
     this.batch.unbind();
 };
-},{"../particles":189,"as-number":6,"gl-basic-shader":31,"gl-mat4":66,"gl-quad-batch":80,"gl-white-texture":141,"glslify":156,"glslify/simple-adapter.js":157,"inherits":159,"premultiplied-rgba":163}],5:[function(require,module,exports){
+},{"../particles":331,"as-number":9,"gl-basic-shader":34,"gl-mat4":69,"gl-quad-batch":83,"gl-white-texture":144,"glslify":159,"glslify/simple-adapter.js":160,"inherits":163,"premultiplied-rgba":305}],8:[function(require,module,exports){
 var Vignette = require('gl-vignette-background')
 var defaultShader = require('gl-basic-shader')
 var Icosphere = require('icosphere')
@@ -282,6 +415,7 @@ function Sphere(gl, opt) {
     this.spin = mat4.create()
     this.projection = mat4.create()
 
+    this.innerRotation = [0,0,0]
     this.innerScale = [1,1,1]
     this.outerScale = [1,1,1]
 
@@ -310,7 +444,12 @@ Sphere.prototype.draw = function(width, height, dt) {
     mat4.rotateY(view, view, dt / 1000 * 0.25)
 
     //also rotate the transform a little bit more
-    mat4.rotateY(spin, spin, dt / 1000 * 0.5)
+    // mat4.rotateY(spin, spin, dt / 1000 * 0.5)
+    mat4.identity(spin)
+    var innerRotation = this.innerRotation
+    mat4.rotateX(spin, spin, innerRotation[0])
+    mat4.rotateY(spin, spin, innerRotation[1])
+    mat4.rotateZ(spin, spin, innerRotation[2])
 
     shader.bind()
     shader.uniforms.view = view
@@ -345,13 +484,13 @@ Sphere.prototype.draw = function(width, height, dt) {
     
     lowpoly.unbind()
 }
-},{"gl-basic-shader":31,"gl-geometry":51,"gl-mat4":66,"gl-vignette-background":108,"gl-wireframe":155,"icosphere":158,"premultiplied-rgba":163}],6:[function(require,module,exports){
+},{"gl-basic-shader":34,"gl-geometry":54,"gl-mat4":69,"gl-vignette-background":111,"gl-wireframe":158,"icosphere":161,"premultiplied-rgba":305}],9:[function(require,module,exports){
 module.exports = function numtype(num, def) {
 	return typeof num === 'number'
 		? num 
 		: (typeof def === 'number' ? def : 0)
 }
-},{}],7:[function(require,module,exports){
+},{}],10:[function(require,module,exports){
 var getGL = require('webgl-context');
 var debounce = require('debounce');
 var addEvent = require('add-event-listener');
@@ -549,7 +688,7 @@ CanvasApp.prototype.resize = function(width, height) {
 };
 
 module.exports = CanvasApp;
-},{"add-event-listener":8,"debounce":9,"webgl-context":11}],8:[function(require,module,exports){
+},{"add-event-listener":11,"debounce":12,"webgl-context":14}],11:[function(require,module,exports){
 addEventListener.removeEventListener = removeEventListener
 addEventListener.addEventListener = addEventListener
 
@@ -597,7 +736,7 @@ function oldIEDetach(el, eventName, listener, useCapture) {
   el.detachEvent('on' + eventName, listener)
 }
 
-},{}],9:[function(require,module,exports){
+},{}],12:[function(require,module,exports){
 
 /**
  * Module dependencies.
@@ -652,14 +791,14 @@ module.exports = function debounce(func, wait, immediate){
   };
 };
 
-},{"date-now":10}],10:[function(require,module,exports){
+},{"date-now":13}],13:[function(require,module,exports){
 module.exports = Date.now || now
 
 function now() {
     return new Date().getTime()
 }
 
-},{}],11:[function(require,module,exports){
+},{}],14:[function(require,module,exports){
 module.exports = function(opts) {
     opts = opts||{};
     var canvas = opts.canvas || document.createElement("canvas");
@@ -676,7 +815,7 @@ module.exports = function(opts) {
     }
     return gl;
 };
-},{}],12:[function(require,module,exports){
+},{}],15:[function(require,module,exports){
 var domready = require('domready');
 require('raf.js');
 
@@ -712,7 +851,7 @@ module.exports = function( render, start, options ) {
 		runner.start();
 	});
 };
-},{"canvas-app":7,"domready":13,"raf.js":14}],13:[function(require,module,exports){
+},{"canvas-app":10,"domready":16,"raf.js":17}],16:[function(require,module,exports){
 /*!
   * domready (c) Dustin Diaz 2014 - License MIT
   */
@@ -744,7 +883,7 @@ module.exports = function( render, start, options ) {
 
 });
 
-},{}],14:[function(require,module,exports){
+},{}],17:[function(require,module,exports){
 /*
  * raf.js
  * https://github.com/ngryman/raf.js
@@ -787,7 +926,7 @@ module.exports = function( render, start, options ) {
 	window.cancelAnimationFrame = cancelAnimationFrame;
 }(window));
 
-},{}],15:[function(require,module,exports){
+},{}],18:[function(require,module,exports){
 "use strict"
 
 //High level idea:
@@ -1234,7 +1373,7 @@ function incrementalConvexHull(points, randomSearch) {
   //Extract boundary cells
   return triangles.boundary()
 }
-},{"robust-orientation":21,"simplicial-complex":24}],16:[function(require,module,exports){
+},{"robust-orientation":24,"simplicial-complex":27}],19:[function(require,module,exports){
 "use strict"
 
 module.exports = fastTwoSum
@@ -1252,7 +1391,7 @@ function fastTwoSum(a, b, result) {
 	}
 	return [ar+br, x]
 }
-},{}],17:[function(require,module,exports){
+},{}],20:[function(require,module,exports){
 "use strict"
 
 var twoProduct = require("two-product")
@@ -1303,7 +1442,7 @@ function scaleLinearExpansion(e, scale) {
   g.length = count
   return g
 }
-},{"two-product":20,"two-sum":16}],18:[function(require,module,exports){
+},{"two-product":23,"two-sum":19}],21:[function(require,module,exports){
 "use strict"
 
 module.exports = robustSubtract
@@ -1460,7 +1599,7 @@ function robustSubtract(e, f) {
   g.length = count
   return g
 }
-},{}],19:[function(require,module,exports){
+},{}],22:[function(require,module,exports){
 "use strict"
 
 module.exports = linearExpansionSum
@@ -1617,7 +1756,7 @@ function linearExpansionSum(e, f) {
   g.length = count
   return g
 }
-},{}],20:[function(require,module,exports){
+},{}],23:[function(require,module,exports){
 "use strict"
 
 module.exports = twoProduct
@@ -1651,7 +1790,7 @@ function twoProduct(a, b, result) {
 
   return [ y, x ]
 }
-},{}],21:[function(require,module,exports){
+},{}],24:[function(require,module,exports){
 "use strict"
 
 var twoProduct = require("two-product")
@@ -1842,7 +1981,7 @@ function generateOrientationProc() {
 }
 
 generateOrientationProc()
-},{"robust-scale":17,"robust-subtract":18,"robust-sum":19,"two-product":20}],22:[function(require,module,exports){
+},{"robust-scale":20,"robust-subtract":21,"robust-sum":22,"two-product":23}],25:[function(require,module,exports){
 /**
  * Bit twiddling hacks for JavaScript.
  *
@@ -2048,7 +2187,7 @@ exports.nextCombination = function(v) {
 }
 
 
-},{}],23:[function(require,module,exports){
+},{}],26:[function(require,module,exports){
 "use strict"; "use restrict";
 
 module.exports = UnionFind;
@@ -2107,7 +2246,7 @@ proto.link = function(x, y) {
     ++ranks[xr];
   }
 }
-},{}],24:[function(require,module,exports){
+},{}],27:[function(require,module,exports){
 "use strict"; "use restrict";
 
 var bits      = require("bit-twiddle")
@@ -2451,7 +2590,7 @@ function connectedComponents(cells, vertex_count) {
 }
 exports.connectedComponents = connectedComponents
 
-},{"bit-twiddle":22,"union-find":23}],25:[function(require,module,exports){
+},{"bit-twiddle":25,"union-find":26}],28:[function(require,module,exports){
 "use strict"
 
 function unique_pred(list, compare) {
@@ -2510,7 +2649,7 @@ function unique(list, compare, sorted) {
 
 module.exports = unique
 
-},{}],26:[function(require,module,exports){
+},{}],29:[function(require,module,exports){
 "use strict"
 
 var ch = require("incremental-convex-hull")
@@ -2670,7 +2809,7 @@ function triangulate(points, includePointAtInfinity) {
 
   return hull
 }
-},{"incremental-convex-hull":15,"uniq":25}],27:[function(require,module,exports){
+},{"incremental-convex-hull":18,"uniq":28}],30:[function(require,module,exports){
 
 var synth = require('synthetic-dom-events');
 
@@ -2721,7 +2860,7 @@ module.exports = {
     emit: emit
 };
 
-},{"synthetic-dom-events":28}],28:[function(require,module,exports){
+},{"synthetic-dom-events":31}],31:[function(require,module,exports){
 
 // for compression
 var win = window;
@@ -2842,7 +2981,7 @@ var typeOf = (function () {
     };
 })();
 
-},{"./init.json":29,"./types.json":30}],29:[function(require,module,exports){
+},{"./init.json":32,"./types.json":33}],32:[function(require,module,exports){
 module.exports={
   "initEvent" : [
     "type",
@@ -2909,7 +3048,7 @@ module.exports={
   ]
 }
 
-},{}],30:[function(require,module,exports){
+},{}],33:[function(require,module,exports){
 module.exports={
   "MouseEvent" : [
     "click",
@@ -2954,7 +3093,7 @@ module.exports={
   ]
 }
 
-},{}],31:[function(require,module,exports){
+},{}],34:[function(require,module,exports){
 var identity = require('gl-mat4/identity')
 var createShader = require('gl-shader-core')
 
@@ -3098,7 +3237,7 @@ function createFragmentShader(hasColors, numTexCoords) {
     shader += ";\n}";
     return shader;
 }
-},{"gl-mat4/identity":32,"gl-shader-core":37}],32:[function(require,module,exports){
+},{"gl-mat4/identity":35,"gl-shader-core":40}],35:[function(require,module,exports){
 module.exports = identity;
 
 /**
@@ -3126,7 +3265,7 @@ function identity(out) {
     out[15] = 1;
     return out;
 };
-},{}],33:[function(require,module,exports){
+},{}],36:[function(require,module,exports){
 'use strict'
 
 module.exports = createAttributeWrapper
@@ -3222,7 +3361,7 @@ function createAttributeWrapper(gl, program, attributes, doLink) {
   }
   return obj
 }
-},{}],34:[function(require,module,exports){
+},{}],37:[function(require,module,exports){
 'use strict'
 
 var dup = require('dup')
@@ -3404,7 +3543,7 @@ function createUniformWrapper(gl, program, uniforms, locations) {
   }
 }
 
-},{"./reflect":35,"dup":36}],35:[function(require,module,exports){
+},{"./reflect":38,"dup":39}],38:[function(require,module,exports){
 'use strict'
 
 module.exports = makeReflectTypes
@@ -3462,7 +3601,7 @@ function makeReflectTypes(uniforms, useIndex) {
   }
   return obj
 }
-},{}],36:[function(require,module,exports){
+},{}],39:[function(require,module,exports){
 "use strict"
 
 function dupe_array(count, value, i) {
@@ -3512,7 +3651,7 @@ function dupe(count, value) {
 }
 
 module.exports = dupe
-},{}],37:[function(require,module,exports){
+},{}],40:[function(require,module,exports){
 'use strict'
 
 var createUniformWrapper = require('./lib/create-uniforms')
@@ -3643,7 +3782,7 @@ function createShader(
 
 module.exports = createShader
 
-},{"./lib/create-attributes":33,"./lib/create-uniforms":34,"./lib/reflect":35}],38:[function(require,module,exports){
+},{"./lib/create-attributes":36,"./lib/create-uniforms":37,"./lib/reflect":38}],41:[function(require,module,exports){
 "use strict"
 
 var pool = require("typedarray-pool")
@@ -3795,7 +3934,7 @@ function createBuffer(gl, data, type, usage) {
 }
 
 module.exports = createBuffer
-},{"ndarray":44,"ndarray-ops":39,"typedarray-pool":48,"webglew":50}],39:[function(require,module,exports){
+},{"ndarray":47,"ndarray-ops":42,"typedarray-pool":51,"webglew":53}],42:[function(require,module,exports){
 "use strict"
 
 var compile = require("cwise-compiler")
@@ -4258,7 +4397,7 @@ exports.equals = compile({
 
 
 
-},{"cwise-compiler":40}],40:[function(require,module,exports){
+},{"cwise-compiler":43}],43:[function(require,module,exports){
 "use strict"
 
 var createThunk = require("./lib/thunk.js")
@@ -4366,7 +4505,7 @@ function compileCwise(user_args) {
 
 module.exports = compileCwise
 
-},{"./lib/thunk.js":42}],41:[function(require,module,exports){
+},{"./lib/thunk.js":45}],44:[function(require,module,exports){
 "use strict"
 
 var uniq = require("uniq")
@@ -4654,7 +4793,7 @@ function generateCWiseOp(proc, typesig) {
   return f()
 }
 module.exports = generateCWiseOp
-},{"uniq":43}],42:[function(require,module,exports){
+},{"uniq":46}],45:[function(require,module,exports){
 "use strict"
 
 var compile = require("./compile.js")
@@ -4703,9 +4842,9 @@ function createThunk(proc) {
 
 module.exports = createThunk
 
-},{"./compile.js":41}],43:[function(require,module,exports){
-module.exports=require(25)
-},{}],44:[function(require,module,exports){
+},{"./compile.js":44}],46:[function(require,module,exports){
+module.exports=require(28)
+},{}],47:[function(require,module,exports){
 (function (Buffer){
 var iota = require("iota-array")
 
@@ -5105,7 +5244,7 @@ function wrappedNDArrayCtor(data, shape, stride, offset) {
 
 module.exports = wrappedNDArrayCtor
 }).call(this,require("buffer").Buffer)
-},{"buffer":192,"iota-array":45}],45:[function(require,module,exports){
+},{"buffer":334,"iota-array":48}],48:[function(require,module,exports){
 "use strict"
 
 function iota(n) {
@@ -5117,11 +5256,11 @@ function iota(n) {
 }
 
 module.exports = iota
-},{}],46:[function(require,module,exports){
-module.exports=require(22)
-},{}],47:[function(require,module,exports){
-module.exports=require(36)
-},{}],48:[function(require,module,exports){
+},{}],49:[function(require,module,exports){
+module.exports=require(25)
+},{}],50:[function(require,module,exports){
+module.exports=require(39)
+},{}],51:[function(require,module,exports){
 (function (global,Buffer){
 'use strict'
 
@@ -5338,7 +5477,7 @@ exports.clearCache = function clearCache() {
   }
 }
 }).call(this,typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {},require("buffer").Buffer)
-},{"bit-twiddle":46,"buffer":192,"dup":47}],49:[function(require,module,exports){
+},{"bit-twiddle":49,"buffer":334,"dup":50}],52:[function(require,module,exports){
 /* (The MIT License)
  *
  * Copyright (c) 2012 Brandon Benvie <http://bbenvie.com>
@@ -5580,7 +5719,7 @@ void function(global, undefined_, undefined){
     global.WeakMap.createStorage = createStorage;
 }((0, eval)('this'));
 
-},{}],50:[function(require,module,exports){
+},{}],53:[function(require,module,exports){
 'use strict'
 
 var weakMap = typeof WeakMap === 'undefined' ? require('weakmap') : WeakMap
@@ -5622,7 +5761,7 @@ function initWebGLEW(gl) {
   return extensions
 }
 module.exports = initWebGLEW
-},{"weakmap":49}],51:[function(require,module,exports){
+},{"weakmap":52}],54:[function(require,module,exports){
 var normalize = require('./normalize')
 var createVAO = require('gl-vao')
 
@@ -5732,7 +5871,7 @@ GLGeometry.prototype.update = function update() {
   )
 }
 
-},{"./normalize":56,"gl-vao":106}],52:[function(require,module,exports){
+},{"./normalize":59,"gl-vao":109}],55:[function(require,module,exports){
 var dtype = require('dtype')
 
 module.exports = pack
@@ -5760,7 +5899,7 @@ function pack(arr, type) {
   return out
 }
 
-},{"dtype":53}],53:[function(require,module,exports){
+},{"dtype":56}],56:[function(require,module,exports){
 module.exports = function(dtype) {
   switch (dtype) {
     case 'int8':
@@ -5783,7 +5922,7 @@ module.exports = function(dtype) {
       return Array
   }
 }
-},{}],54:[function(require,module,exports){
+},{}],57:[function(require,module,exports){
 module.exports      = isTypedArray
 isTypedArray.strict = isStrictTypedArray
 isTypedArray.loose  = isLooseTypedArray
@@ -5824,7 +5963,7 @@ function isLooseTypedArray(arr) {
   return names[toString.call(arr)]
 }
 
-},{}],55:[function(require,module,exports){
+},{}],58:[function(require,module,exports){
 module.exports = function(arr) {
   if (!arr) return false
   if (!arr.dtype) return false
@@ -5832,7 +5971,7 @@ module.exports = function(arr) {
   return re.test(String(arr.constructor))
 }
 
-},{}],56:[function(require,module,exports){
+},{}],59:[function(require,module,exports){
 var pack         = require('array-pack-2d')
 var ista         = require('is-typedarray')
 var createBuffer = require('gl-buffer')
@@ -5913,7 +6052,7 @@ function convert(a, b) {
   return b
 }
 
-},{"array-pack-2d":52,"dtype":53,"gl-buffer":38,"is-typedarray":54,"isndarray":55}],57:[function(require,module,exports){
+},{"array-pack-2d":55,"dtype":56,"gl-buffer":41,"is-typedarray":57,"isndarray":58}],60:[function(require,module,exports){
 module.exports = adjoint;
 
 /**
@@ -5947,7 +6086,7 @@ function adjoint(out, a) {
     out[15] =  (a00 * (a11 * a22 - a12 * a21) - a10 * (a01 * a22 - a02 * a21) + a20 * (a01 * a12 - a02 * a11));
     return out;
 };
-},{}],58:[function(require,module,exports){
+},{}],61:[function(require,module,exports){
 module.exports = clone;
 
 /**
@@ -5976,7 +6115,7 @@ function clone(a) {
     out[15] = a[15];
     return out;
 };
-},{}],59:[function(require,module,exports){
+},{}],62:[function(require,module,exports){
 module.exports = copy;
 
 /**
@@ -6005,7 +6144,7 @@ function copy(out, a) {
     out[15] = a[15];
     return out;
 };
-},{}],60:[function(require,module,exports){
+},{}],63:[function(require,module,exports){
 module.exports = create;
 
 /**
@@ -6033,7 +6172,7 @@ function create() {
     out[15] = 1;
     return out;
 };
-},{}],61:[function(require,module,exports){
+},{}],64:[function(require,module,exports){
 module.exports = determinant;
 
 /**
@@ -6064,7 +6203,7 @@ function determinant(a) {
     // Calculate the determinant
     return b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07 + b05 * b06;
 };
-},{}],62:[function(require,module,exports){
+},{}],65:[function(require,module,exports){
 module.exports = fromQuat;
 
 /**
@@ -6112,7 +6251,7 @@ function fromQuat(out, q) {
 
     return out;
 };
-},{}],63:[function(require,module,exports){
+},{}],66:[function(require,module,exports){
 module.exports = fromRotationTranslation;
 
 /**
@@ -6166,7 +6305,7 @@ function fromRotationTranslation(out, q, v) {
     
     return out;
 };
-},{}],64:[function(require,module,exports){
+},{}],67:[function(require,module,exports){
 module.exports = frustum;
 
 /**
@@ -6203,9 +6342,9 @@ function frustum(out, left, right, bottom, top, near, far) {
     out[15] = 0;
     return out;
 };
-},{}],65:[function(require,module,exports){
-module.exports=require(32)
-},{}],66:[function(require,module,exports){
+},{}],68:[function(require,module,exports){
+module.exports=require(35)
+},{}],69:[function(require,module,exports){
 module.exports = {
   create: require('./create')
   , clone: require('./clone')
@@ -6230,7 +6369,7 @@ module.exports = {
   , lookAt: require('./lookAt')
   , str: require('./str')
 }
-},{"./adjoint":57,"./clone":58,"./copy":59,"./create":60,"./determinant":61,"./fromQuat":62,"./fromRotationTranslation":63,"./frustum":64,"./identity":65,"./invert":67,"./lookAt":68,"./multiply":69,"./ortho":70,"./perspective":71,"./rotate":72,"./rotateX":73,"./rotateY":74,"./rotateZ":75,"./scale":76,"./str":77,"./translate":78,"./transpose":79}],67:[function(require,module,exports){
+},{"./adjoint":60,"./clone":61,"./copy":62,"./create":63,"./determinant":64,"./fromQuat":65,"./fromRotationTranslation":66,"./frustum":67,"./identity":68,"./invert":70,"./lookAt":71,"./multiply":72,"./ortho":73,"./perspective":74,"./rotate":75,"./rotateX":76,"./rotateY":77,"./rotateZ":78,"./scale":79,"./str":80,"./translate":81,"./transpose":82}],70:[function(require,module,exports){
 module.exports = invert;
 
 /**
@@ -6286,7 +6425,7 @@ function invert(out, a) {
 
     return out;
 };
-},{}],68:[function(require,module,exports){
+},{}],71:[function(require,module,exports){
 module.exports = lookAt;
 
 /**
@@ -6375,7 +6514,7 @@ function lookAt(out, eye, center, up) {
 
     return out;
 };
-},{}],69:[function(require,module,exports){
+},{}],72:[function(require,module,exports){
 module.exports = multiply;
 
 /**
@@ -6418,7 +6557,7 @@ function multiply(out, a, b) {
     out[15] = b0*a03 + b1*a13 + b2*a23 + b3*a33;
     return out;
 };
-},{}],70:[function(require,module,exports){
+},{}],73:[function(require,module,exports){
 module.exports = ortho;
 
 /**
@@ -6455,7 +6594,7 @@ function ortho(out, left, right, bottom, top, near, far) {
     out[15] = 1;
     return out;
 };
-},{}],71:[function(require,module,exports){
+},{}],74:[function(require,module,exports){
 module.exports = perspective;
 
 /**
@@ -6489,7 +6628,7 @@ function perspective(out, fovy, aspect, near, far) {
     out[15] = 0;
     return out;
 };
-},{}],72:[function(require,module,exports){
+},{}],75:[function(require,module,exports){
 module.exports = rotate;
 
 /**
@@ -6554,7 +6693,7 @@ function rotate(out, a, rad, axis) {
     }
     return out;
 };
-},{}],73:[function(require,module,exports){
+},{}],76:[function(require,module,exports){
 module.exports = rotateX;
 
 /**
@@ -6599,7 +6738,7 @@ function rotateX(out, a, rad) {
     out[11] = a23 * c - a13 * s;
     return out;
 };
-},{}],74:[function(require,module,exports){
+},{}],77:[function(require,module,exports){
 module.exports = rotateY;
 
 /**
@@ -6644,7 +6783,7 @@ function rotateY(out, a, rad) {
     out[11] = a03 * s + a23 * c;
     return out;
 };
-},{}],75:[function(require,module,exports){
+},{}],78:[function(require,module,exports){
 module.exports = rotateZ;
 
 /**
@@ -6689,7 +6828,7 @@ function rotateZ(out, a, rad) {
     out[7] = a13 * c - a03 * s;
     return out;
 };
-},{}],76:[function(require,module,exports){
+},{}],79:[function(require,module,exports){
 module.exports = scale;
 
 /**
@@ -6721,7 +6860,7 @@ function scale(out, a, v) {
     out[15] = a[15];
     return out;
 };
-},{}],77:[function(require,module,exports){
+},{}],80:[function(require,module,exports){
 module.exports = str;
 
 /**
@@ -6736,7 +6875,7 @@ function str(a) {
                     a[8] + ', ' + a[9] + ', ' + a[10] + ', ' + a[11] + ', ' + 
                     a[12] + ', ' + a[13] + ', ' + a[14] + ', ' + a[15] + ')';
 };
-},{}],78:[function(require,module,exports){
+},{}],81:[function(require,module,exports){
 module.exports = translate;
 
 /**
@@ -6775,7 +6914,7 @@ function translate(out, a, v) {
 
     return out;
 };
-},{}],79:[function(require,module,exports){
+},{}],82:[function(require,module,exports){
 module.exports = transpose;
 
 /**
@@ -6825,7 +6964,7 @@ function transpose(out, a) {
     
     return out;
 };
-},{}],80:[function(require,module,exports){
+},{}],83:[function(require,module,exports){
 var createBuffer = require('gl-buffer')
 var createVAO = require('gl-vao')
 var colorToFloat = require('number-util').colorToFloat
@@ -7049,7 +7188,7 @@ QuadBatch.prototype.unbind = function() {
 }
 
 module.exports = QuadBatch
-},{"gl-buffer":81,"gl-vao":99,"number-util":100}],81:[function(require,module,exports){
+},{"gl-buffer":84,"gl-vao":102,"number-util":103}],84:[function(require,module,exports){
 "use strict"
 
 var pool = require("typedarray-pool")
@@ -7201,25 +7340,25 @@ function createBuffer(gl, data, type, usage) {
 }
 
 module.exports = createBuffer
-},{"ndarray":87,"ndarray-ops":82,"typedarray-pool":91,"webglew":93}],82:[function(require,module,exports){
-module.exports=require(39)
-},{"cwise-compiler":83}],83:[function(require,module,exports){
-module.exports=require(40)
-},{"./lib/thunk.js":85}],84:[function(require,module,exports){
-module.exports=require(41)
-},{"uniq":86}],85:[function(require,module,exports){
+},{"ndarray":90,"ndarray-ops":85,"typedarray-pool":94,"webglew":96}],85:[function(require,module,exports){
 module.exports=require(42)
-},{"./compile.js":84}],86:[function(require,module,exports){
-module.exports=require(25)
-},{}],87:[function(require,module,exports){
+},{"cwise-compiler":86}],86:[function(require,module,exports){
+module.exports=require(43)
+},{"./lib/thunk.js":88}],87:[function(require,module,exports){
 module.exports=require(44)
-},{"buffer":192,"iota-array":88}],88:[function(require,module,exports){
+},{"uniq":89}],88:[function(require,module,exports){
 module.exports=require(45)
-},{}],89:[function(require,module,exports){
-module.exports=require(22)
+},{"./compile.js":87}],89:[function(require,module,exports){
+module.exports=require(28)
 },{}],90:[function(require,module,exports){
-module.exports=require(36)
-},{}],91:[function(require,module,exports){
+module.exports=require(47)
+},{"buffer":334,"iota-array":91}],91:[function(require,module,exports){
+module.exports=require(48)
+},{}],92:[function(require,module,exports){
+module.exports=require(25)
+},{}],93:[function(require,module,exports){
+module.exports=require(39)
+},{}],94:[function(require,module,exports){
 (function (global,Buffer){
 var bits = require("bit-twiddle")
 var dup = require("dup")
@@ -7589,9 +7728,9 @@ exports.clearCache = function clearCache() {
   }
 }
 }).call(this,typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {},require("buffer").Buffer)
-},{"bit-twiddle":89,"buffer":192,"dup":90}],92:[function(require,module,exports){
-module.exports=require(49)
-},{}],93:[function(require,module,exports){
+},{"bit-twiddle":92,"buffer":334,"dup":93}],95:[function(require,module,exports){
+module.exports=require(52)
+},{}],96:[function(require,module,exports){
 "use strict";
 
 var weakMap = typeof WeakMap === "undefined" ? require("weakmap") : WeakMap
@@ -7628,7 +7767,7 @@ function initWebGLEW(gl) {
   return extensions
 }
 module.exports = initWebGLEW
-},{"weakmap":92}],94:[function(require,module,exports){
+},{"weakmap":95}],97:[function(require,module,exports){
 "use strict"
 
 function doBind(gl, elements, attributes) {
@@ -7683,7 +7822,7 @@ function doBind(gl, elements, attributes) {
 }
 
 module.exports = doBind
-},{}],95:[function(require,module,exports){
+},{}],98:[function(require,module,exports){
 "use strict"
 
 var bindAttribs = require("./do-bind.js")
@@ -7721,7 +7860,7 @@ function createVAOEmulated(gl) {
 }
 
 module.exports = createVAOEmulated
-},{"./do-bind.js":94}],96:[function(require,module,exports){
+},{"./do-bind.js":97}],99:[function(require,module,exports){
 "use strict"
 
 var bindAttribs = require("./do-bind.js")
@@ -7807,11 +7946,11 @@ function createVAONative(gl, ext) {
 }
 
 module.exports = createVAONative
-},{"./do-bind.js":94}],97:[function(require,module,exports){
-module.exports=require(49)
-},{}],98:[function(require,module,exports){
-module.exports=require(93)
-},{"weakmap":97}],99:[function(require,module,exports){
+},{"./do-bind.js":97}],100:[function(require,module,exports){
+module.exports=require(52)
+},{}],101:[function(require,module,exports){
+module.exports=require(96)
+},{"weakmap":100}],102:[function(require,module,exports){
 "use strict"
 
 var webglew = require("webglew")
@@ -7831,7 +7970,7 @@ function createVAO(gl, attributes, elements) {
 }
 
 module.exports = createVAO
-},{"./lib/vao-emulated.js":95,"./lib/vao-native.js":96,"webglew":98}],100:[function(require,module,exports){
+},{"./lib/vao-emulated.js":98,"./lib/vao-native.js":99,"webglew":101}],103:[function(require,module,exports){
 var int8 = new Int8Array(4);
 var int32 = new Int32Array(int8.buffer, 0, 1);
 var float32 = new Float32Array(int8.buffer, 0, 1);
@@ -7929,9 +8068,9 @@ NumberUtil.nextPowerOfTwo = function(n) {
 };
 
 module.exports = NumberUtil;
-},{}],101:[function(require,module,exports){
-module.exports=require(94)
-},{}],102:[function(require,module,exports){
+},{}],104:[function(require,module,exports){
+module.exports=require(97)
+},{}],105:[function(require,module,exports){
 "use strict"
 
 var bindAttribs = require("./do-bind.js")
@@ -7971,7 +8110,7 @@ function createVAOEmulated(gl) {
 }
 
 module.exports = createVAOEmulated
-},{"./do-bind.js":101}],103:[function(require,module,exports){
+},{"./do-bind.js":104}],106:[function(require,module,exports){
 "use strict"
 
 var bindAttribs = require("./do-bind.js")
@@ -8059,11 +8198,11 @@ function createVAONative(gl, ext) {
 }
 
 module.exports = createVAONative
-},{"./do-bind.js":101}],104:[function(require,module,exports){
-module.exports=require(49)
-},{}],105:[function(require,module,exports){
-module.exports=require(50)
-},{"weakmap":104}],106:[function(require,module,exports){
+},{"./do-bind.js":104}],107:[function(require,module,exports){
+module.exports=require(52)
+},{}],108:[function(require,module,exports){
+module.exports=require(53)
+},{"weakmap":107}],109:[function(require,module,exports){
 "use strict"
 
 var webglew = require("webglew")
@@ -8083,7 +8222,7 @@ function createVAO(gl, attributes, elements, elementsType) {
 }
 
 module.exports = createVAO
-},{"./lib/vao-emulated.js":102,"./lib/vao-native.js":103,"webglew":105}],107:[function(require,module,exports){
+},{"./lib/vao-emulated.js":105,"./lib/vao-native.js":106,"webglew":108}],110:[function(require,module,exports){
 //should be split out...
 var create = require('gl-shader-core')
 var copy = require('deepcopy')
@@ -8115,7 +8254,7 @@ module.exports = function(shader) {
 		return create(gl, s.vertex, s.fragment, s.uniforms, s.attributes)
 	}
 }
-},{"deepcopy":109,"gl-shader-core":137}],108:[function(require,module,exports){
+},{"deepcopy":112,"gl-shader-core":140}],111:[function(require,module,exports){
 var glslify = require("glslify");
 var Quad = require("gl-quad");
 var inherits = require("inherits");
@@ -8186,7 +8325,7 @@ Vignette.prototype.dispose = function() {
 };
 
 module.exports = Vignette;
-},{"./create-shader":107,"gl-mat4/create":111,"gl-mat4/identity":112,"gl-quad":113,"glslify":138,"glslify/simple-adapter.js":139,"inherits":140}],109:[function(require,module,exports){
+},{"./create-shader":110,"gl-mat4/create":114,"gl-mat4/identity":115,"gl-quad":116,"glslify":141,"glslify/simple-adapter.js":142,"inherits":143}],112:[function(require,module,exports){
 /*!
  * deepcopy.js Copyright(c) 2013 sasa+1
  * https://github.com/sasaplus1/deepcopy.js
@@ -8197,7 +8336,7 @@ module.exports = Vignette;
 /** export deepcopy function. */
 module.exports = require('./lib/deepcopy');
 
-},{"./lib/deepcopy":110}],110:[function(require,module,exports){
+},{"./lib/deepcopy":113}],113:[function(require,module,exports){
 /*!
  * @license deepcopy.js Copyright(c) 2013 sasa+1
  * https://github.com/sasaplus1/deepcopy.js
@@ -8362,11 +8501,11 @@ module.exports = require('./lib/deepcopy');
 
 }());
 
-},{"util":201}],111:[function(require,module,exports){
-module.exports=require(60)
-},{}],112:[function(require,module,exports){
-module.exports=require(32)
-},{}],113:[function(require,module,exports){
+},{"util":344}],114:[function(require,module,exports){
+module.exports=require(63)
+},{}],115:[function(require,module,exports){
+module.exports=require(35)
+},{}],116:[function(require,module,exports){
 var createBuffer = require('gl-buffer')
 var createVAO = require('gl-vao')
 
@@ -8428,55 +8567,55 @@ Quad.prototype.dispose = function() {
 }
 
 module.exports = Quad
-},{"gl-buffer":114,"gl-vao":132}],114:[function(require,module,exports){
-module.exports=require(38)
-},{"ndarray":120,"ndarray-ops":115,"typedarray-pool":124,"webglew":126}],115:[function(require,module,exports){
-module.exports=require(39)
-},{"cwise-compiler":116}],116:[function(require,module,exports){
-module.exports=require(40)
-},{"./lib/thunk.js":118}],117:[function(require,module,exports){
+},{"gl-buffer":117,"gl-vao":135}],117:[function(require,module,exports){
 module.exports=require(41)
-},{"uniq":119}],118:[function(require,module,exports){
+},{"ndarray":123,"ndarray-ops":118,"typedarray-pool":127,"webglew":129}],118:[function(require,module,exports){
 module.exports=require(42)
-},{"./compile.js":117}],119:[function(require,module,exports){
-module.exports=require(25)
-},{}],120:[function(require,module,exports){
+},{"cwise-compiler":119}],119:[function(require,module,exports){
+module.exports=require(43)
+},{"./lib/thunk.js":121}],120:[function(require,module,exports){
 module.exports=require(44)
-},{"buffer":192,"iota-array":121}],121:[function(require,module,exports){
+},{"uniq":122}],121:[function(require,module,exports){
 module.exports=require(45)
-},{}],122:[function(require,module,exports){
-module.exports=require(22)
+},{"./compile.js":120}],122:[function(require,module,exports){
+module.exports=require(28)
 },{}],123:[function(require,module,exports){
-module.exports=require(36)
-},{}],124:[function(require,module,exports){
+module.exports=require(47)
+},{"buffer":334,"iota-array":124}],124:[function(require,module,exports){
 module.exports=require(48)
-},{"bit-twiddle":122,"buffer":192,"dup":123}],125:[function(require,module,exports){
-module.exports=require(49)
+},{}],125:[function(require,module,exports){
+module.exports=require(25)
 },{}],126:[function(require,module,exports){
-module.exports=require(50)
-},{"weakmap":125}],127:[function(require,module,exports){
-module.exports=require(94)
-},{}],128:[function(require,module,exports){
-module.exports=require(102)
-},{"./do-bind.js":127}],129:[function(require,module,exports){
-module.exports=require(103)
-},{"./do-bind.js":127}],130:[function(require,module,exports){
-module.exports=require(49)
+module.exports=require(39)
+},{}],127:[function(require,module,exports){
+module.exports=require(51)
+},{"bit-twiddle":125,"buffer":334,"dup":126}],128:[function(require,module,exports){
+module.exports=require(52)
+},{}],129:[function(require,module,exports){
+module.exports=require(53)
+},{"weakmap":128}],130:[function(require,module,exports){
+module.exports=require(97)
 },{}],131:[function(require,module,exports){
-module.exports=require(50)
-},{"weakmap":130}],132:[function(require,module,exports){
+module.exports=require(105)
+},{"./do-bind.js":130}],132:[function(require,module,exports){
 module.exports=require(106)
-},{"./lib/vao-emulated.js":128,"./lib/vao-native.js":129,"webglew":131}],133:[function(require,module,exports){
-module.exports=require(33)
+},{"./do-bind.js":130}],133:[function(require,module,exports){
+module.exports=require(52)
 },{}],134:[function(require,module,exports){
-module.exports=require(34)
-},{"./reflect":135,"dup":136}],135:[function(require,module,exports){
-module.exports=require(35)
-},{}],136:[function(require,module,exports){
+module.exports=require(53)
+},{"weakmap":133}],135:[function(require,module,exports){
+module.exports=require(109)
+},{"./lib/vao-emulated.js":131,"./lib/vao-native.js":132,"webglew":134}],136:[function(require,module,exports){
 module.exports=require(36)
 },{}],137:[function(require,module,exports){
 module.exports=require(37)
-},{"./lib/create-attributes":133,"./lib/create-uniforms":134,"./lib/reflect":135}],138:[function(require,module,exports){
+},{"./reflect":138,"dup":139}],138:[function(require,module,exports){
+module.exports=require(38)
+},{}],139:[function(require,module,exports){
+module.exports=require(39)
+},{}],140:[function(require,module,exports){
+module.exports=require(40)
+},{"./lib/create-attributes":136,"./lib/create-uniforms":137,"./lib/reflect":138}],141:[function(require,module,exports){
 module.exports = noop
 
 function noop() {
@@ -8486,7 +8625,7 @@ function noop() {
   )
 }
 
-},{}],139:[function(require,module,exports){
+},{}],142:[function(require,module,exports){
 module.exports = programify
 
 function programify(vertex, fragment, uniforms, attributes) {
@@ -8498,7 +8637,7 @@ function programify(vertex, fragment, uniforms, attributes) {
   };
 }
 
-},{}],140:[function(require,module,exports){
+},{}],143:[function(require,module,exports){
 if (typeof Object.create === 'function') {
   // implementation from standard node.js 'util' module
   module.exports = function inherits(ctor, superCtor) {
@@ -8523,7 +8662,7 @@ if (typeof Object.create === 'function') {
   }
 }
 
-},{}],141:[function(require,module,exports){
+},{}],144:[function(require,module,exports){
 var create = require('gl-texture2d')
 var ndarray = require('ndarray')
 
@@ -8535,27 +8674,27 @@ module.exports = function(gl) {
     var array = ndarray(new Uint8Array(data), [2, 2, 4])
     return create(gl, array)
 }
-},{"gl-texture2d":152,"ndarray":153}],142:[function(require,module,exports){
-module.exports=require(39)
-},{"cwise-compiler":143}],143:[function(require,module,exports){
-module.exports=require(40)
-},{"./lib/thunk.js":145}],144:[function(require,module,exports){
-module.exports=require(41)
-},{"uniq":146}],145:[function(require,module,exports){
+},{"gl-texture2d":155,"ndarray":156}],145:[function(require,module,exports){
 module.exports=require(42)
-},{"./compile.js":144}],146:[function(require,module,exports){
+},{"cwise-compiler":146}],146:[function(require,module,exports){
+module.exports=require(43)
+},{"./lib/thunk.js":148}],147:[function(require,module,exports){
+module.exports=require(44)
+},{"uniq":149}],148:[function(require,module,exports){
+module.exports=require(45)
+},{"./compile.js":147}],149:[function(require,module,exports){
+module.exports=require(28)
+},{}],150:[function(require,module,exports){
 module.exports=require(25)
-},{}],147:[function(require,module,exports){
-module.exports=require(22)
-},{}],148:[function(require,module,exports){
-module.exports=require(36)
-},{}],149:[function(require,module,exports){
-module.exports=require(48)
-},{"bit-twiddle":147,"buffer":192,"dup":148}],150:[function(require,module,exports){
-module.exports=require(49)
 },{}],151:[function(require,module,exports){
-module.exports=require(50)
-},{"weakmap":150}],152:[function(require,module,exports){
+module.exports=require(39)
+},{}],152:[function(require,module,exports){
+module.exports=require(51)
+},{"bit-twiddle":150,"buffer":334,"dup":151}],153:[function(require,module,exports){
+module.exports=require(52)
+},{}],154:[function(require,module,exports){
+module.exports=require(53)
+},{"weakmap":153}],155:[function(require,module,exports){
 'use strict'
 
 var ndarray = require('ndarray')
@@ -9111,11 +9250,11 @@ function createTexture2D(gl) {
   }
   throw new Error('gl-texture2d: Invalid arguments for texture2d constructor')
 }
-},{"ndarray":153,"ndarray-ops":142,"typedarray-pool":149,"webglew":151}],153:[function(require,module,exports){
-module.exports=require(44)
-},{"buffer":192,"iota-array":154}],154:[function(require,module,exports){
-module.exports=require(45)
-},{}],155:[function(require,module,exports){
+},{"ndarray":156,"ndarray-ops":145,"typedarray-pool":152,"webglew":154}],156:[function(require,module,exports){
+module.exports=require(47)
+},{"buffer":334,"iota-array":157}],157:[function(require,module,exports){
+module.exports=require(48)
+},{}],158:[function(require,module,exports){
 module.exports = wireframe
 
 function wireframe(cells) {
@@ -9134,11 +9273,11 @@ function wireframe(cells) {
   return newcells
 }
 
-},{}],156:[function(require,module,exports){
-module.exports=require(138)
-},{}],157:[function(require,module,exports){
-module.exports=require(139)
-},{}],158:[function(require,module,exports){
+},{}],159:[function(require,module,exports){
+module.exports=require(141)
+},{}],160:[function(require,module,exports){
+module.exports=require(142)
+},{}],161:[function(require,module,exports){
 var normalize = require('vectors/normalize-nd')
 
 module.exports = icosphere
@@ -9268,14 +9407,3711 @@ function subdivide(complex) {
   }
 }
 
-},{"vectors/normalize-nd":184}],159:[function(require,module,exports){
-module.exports=require(140)
-},{}],160:[function(require,module,exports){
+},{"vectors/normalize-nd":326}],162:[function(require,module,exports){
+module.exports = function compile(property) {
+	if (!property || typeof property !== 'string')
+		throw new Error('must specify property for indexof search')
+
+	return new Function('array', 'value', 'start', [
+		'start = start || 0',
+		'for (var i=start; i<array.length; i++)',
+		'  if (array[i]["' + property +'"] === value)',
+		'      return i',
+		'return -1'
+	].join('\n'))
+}
+},{}],163:[function(require,module,exports){
+module.exports=require(143)
+},{}],164:[function(require,module,exports){
+//Generic list of keyframes with timestamps and values
+
+var lerp = require('lerp-array')
+var range = require('unlerp')
+
+var temp = [0, 0, 0]
+
+function vec3(out, x, y, z) {
+    out[0] = x
+    out[1] = y
+    out[2] = z
+    return out
+}
+
+function sort(a, b) {
+    return a.time - b.time
+}
+
+function Keyframes(frames, sorted) {
+    if (!(this instanceof Keyframes)) 
+        return new Keyframes(frames)
+    this.frames = frames||[]
+    if (!sorted)
+        this.sort()
+}
+
+//Finds the index of the nearest keyframe to the given time stamp.
+//If radius is specified, it will return the nearest only within that radius
+Keyframes.prototype.nearestIndex = function(time, radius) {
+    radius = typeof radius === 'number' ? radius : Number.MAX_VALUE
+    var minDist = Number.MAX_VALUE
+    var nearest = -1
+    for (var i=0; i<this.frames.length; i++) {
+        var dist = Math.abs(this.frames[i].time - time)
+        if (dist < minDist && dist <= radius) {
+            minDist = dist
+            nearest = i
+        }
+    }
+    return nearest
+}
+
+//Gets the keyframe at the index
+Keyframes.prototype.nearest = function(time, radius) {
+    var idx = this.nearestIndex(time, radius)
+    return idx === -1 ? null : this.frames[idx]
+}
+
+//Gets the keyframe at time
+Keyframes.prototype.get = function(time) {
+    return this.nearest(time, 0)
+}
+
+//Gets the keyframe index at time
+Keyframes.prototype.getIndex = function(time) {
+    return this.nearestIndex(time, 0)
+}
+
+//lerps the value at the specified time stamp
+//returns null if no keyframes exist
+Keyframes.prototype.value = function(time, ease) {
+    var v = this.interpolation(time)
+    if (v[0] === -1 || v[1] === -1)
+        return null
+
+    var startFrame = this.frames[ v[0] ]
+    var endFrame = this.frames[ v[1] ]
+    var t = v[2]
+    
+    //frames are the same, don't bother easing
+    if (startFrame === endFrame)
+        return startFrame.value
+
+    //We ease from left keyframe to right, with a custom easing
+    //equation if specified
+    if (typeof ease === 'function')
+        return ease(startFrame, endFrame, t)
+
+    //Otherwise we assume the values are simple numbers and lerp them
+    return lerp(startFrame.value, endFrame.value, t)
+}
+
+Keyframes.prototype.interpolation = function(time) {
+    if (this.frames.length === 0)
+        return vec3(temp, -1, -1, 0)
+
+    var prev = -1
+    //get last keyframe to time
+    for (var i=this.frames.length-1; i>=0; i--) {
+        if (time >= this.frames[i].time) {
+            prev = i
+            break
+        }
+    }
+    
+    //start or end keyframes
+    if (prev === -1 || prev === this.frames.length-1) {
+        if (prev < 0)
+            prev = 0
+        return vec3(temp, prev, prev, 0)
+    } 
+    else {
+        var startFrame = this.frames[prev]
+        var endFrame = this.frames[prev+1]
+
+        //clamp and get range
+        time = Math.max(startFrame.time, Math.min(time, endFrame.time))
+        var t = range(startFrame.time, endFrame.time, time)
+
+        //provide interpolation factor
+        return vec3(temp, prev, prev+1, t)
+    }
+}
+
+Keyframes.prototype.next = function(time) {
+    if (this.frames.length < 1)
+        return null
+
+    var cur = -1
+    //get last keyframe to time
+    for (var i=0; i<this.frames.length; i++) {
+        if (time < this.frames[i].time) {
+            cur = i
+            break
+        }
+    }
+    return cur===-1 ? null : this.frames[cur]
+}
+
+Keyframes.prototype.previous = function(time) {
+    if (this.frames.length < 1)
+        return null
+
+    var cur = -1
+    //get last keyframe to time
+    for (var i=this.frames.length-1; i>=0; i--) {
+        if (time > this.frames[i].time) {
+            cur = i
+            break
+        }
+    }
+    return cur===-1 ? null : this.frames[cur]
+}
+
+//Adds a frame at the given time stamp
+Keyframes.prototype.add = function(frame) {
+    this.frames.push(frame)
+    this.sort()
+}
+
+//convenience for .frames.splice
+//if items are inserted, a sort will be applied after insertion
+Keyframes.prototype.splice = function(index, howmany, itemsN) {
+    this.frames.splice.apply(this.frames, arguments)
+    if (arguments.length > 2)
+        this.sort()
+}
+
+//sorts the keyframes. you should do this after 
+//adding new keyframes that are not in linear time
+Keyframes.prototype.sort = function() {
+    this.frames.sort(sort)
+}
+
+//Clears the keyframe list
+Keyframes.prototype.clear = function() {
+    this.frames.length = 0
+}
+
+Object.defineProperty(Keyframes.prototype, "count", {
+    get: function() {
+        return this.frames.length
+    }
+})
+
+module.exports = Keyframes
+},{"lerp-array":165,"unlerp":167}],165:[function(require,module,exports){
+var lerp = require('lerp')
+
+module.exports = function lerpValues(value1, value2, t, out) {
+    if (typeof value1 === 'number'
+            && typeof value2 === 'number')
+        return lerp(value1, value2, t)
+    else { //assume array
+        out = out||new Array(value1.length)
+        for (var i=0; i<value1.length; i++) 
+            out[i] = lerp(value1[i], value2[i], t)
+        return out
+    }
+}
+},{"lerp":166}],166:[function(require,module,exports){
 function lerp(v0, v1, t) {
     return v0*(1-t)+v1*t
 }
 module.exports = lerp
-},{}],161:[function(require,module,exports){
+},{}],167:[function(require,module,exports){
+module.exports = function range(min, max, value) {
+  return (value - min) / (max - min)
+}
+},{}],168:[function(require,module,exports){
+//some of the features here may end up in keytime-editor or another module
+var loop = require('frame-loop')
+
+var events = require('dom-events')
+var keycode = require('keycode')
+var classes = require('dom-classes')
+
+var createEditor = require('keytime-editor')
+
+function create(update, opt) {
+	opt = opt||{}
+	var editor = (opt.editor || createEditor)()
+	
+	var autoPlay = true
+	var autoTime = 0
+
+	editor.duration = opt.duration || 5
+
+	var lastTime = -1
+	var fin = false
+
+	//render timeline
+	var engine = loop(function(dt) {
+		if (autoPlay) {
+			autoTime += Math.max(30, dt) / 1000
+			editor.playhead(autoTime)
+		}
+
+		var time = editor.playhead()
+		if (time === lastTime)
+			return
+
+		if (time <= (editor.duration + 1)) {
+			update(time)
+			fin = false
+		} else {
+			fin = true
+			autoPlay = false
+			autoTime = 0
+		}
+		lastTime = time
+	})
+
+	editor.on('playhead', function(t) {
+		autoTime = t
+	})
+	editor.on('update', function() {
+		if (engine.running)
+			update(editor.playhead())
+	})
+
+	function stopAuto() {
+		autoPlay = false
+		editor.emit('pause')
+	}
+
+	events.on(editor.element, 'touchdown', stopAuto)
+	events.on(editor.element, 'mousedown', stopAuto)
+	events.on(window, 'keydown', function(ev) {
+		var key = keycode(ev)
+		if (key === 'space') {
+			ev.preventDefault()
+			autoPlay = !autoPlay
+			if (!autoPlay)
+				editor.emit('pause')
+
+			if (fin || ev.shiftKey) {
+				autoPlay = true
+				autoTime = 0
+				editor.emit('start')
+				editor.emit('play')
+			} else if (autoPlay) {
+				editor.emit('resume')
+				editor.emit('play')
+			}
+		} else if (key === 'j') {
+			ev.preventDefault()
+			var pretty = ev.shiftKey ? 2 : undefined
+			console.log( JSON.stringify( editor.timelines(), undefined, pretty ) )
+		} else if (key === 'h' && opt.allowHide !== false) {
+			classes.toggle(editor.element, 'hide')
+		}	
+	})
+	editor.run = engine.run.bind(engine)
+	editor.restart = function() {
+		autoTime = 0
+		autoPlay = true
+	}
+
+	//this is just for our little demo, to edit in dev tool console
+	window.editor = editor 
+
+	// editor.stop = engine.stop.bind(engine)
+	return editor
+}
+module.exports = create
+},{"dom-classes":169,"dom-events":171,"frame-loop":175,"keycode":180,"keytime-editor":186}],169:[function(require,module,exports){
+/**
+ * Module dependencies.
+ */
+
+var index = require('indexof');
+
+/**
+ * Whitespace regexp.
+ */
+
+var whitespaceRe = /\s+/;
+
+/**
+ * toString reference.
+ */
+
+var toString = Object.prototype.toString;
+
+module.exports = classes;
+module.exports.add = add;
+module.exports.contains = has;
+module.exports.has = has;
+module.exports.toggle = toggle;
+module.exports.remove = remove;
+module.exports.removeMatching = removeMatching;
+
+function classes (el) {
+  if (el.classList) {
+    return el.classList;
+  }
+
+  var str = el.className.replace(/^\s+|\s+$/g, '');
+  var arr = str.split(whitespaceRe);
+  if ('' === arr[0]) arr.shift();
+  return arr;
+}
+
+function add (el, name) {
+  // classList
+  if (el.classList) {
+    el.classList.add(name);
+    return;
+  }
+
+  // fallback
+  var arr = classes(el);
+  var i = index(arr, name);
+  if (!~i) arr.push(name);
+  el.className = arr.join(' ');
+}
+
+function has (el, name) {
+  return el.classList
+    ? el.classList.contains(name)
+    : !! ~index(classes(el), name);
+}
+
+function remove (el, name) {
+  if ('[object RegExp]' == toString.call(name)) {
+    return removeMatching(el, name);
+  }
+
+  // classList
+  if (el.classList) {
+    el.classList.remove(name);
+    return;
+  }
+
+  // fallback
+  var arr = classes(el);
+  var i = index(arr, name);
+  if (~i) arr.splice(i, 1);
+  el.className = arr.join(' ');
+}
+
+function removeMatching (el, re, ref) {
+  var arr = Array.prototype.slice.call(classes(el));
+  for (var i = 0; i < arr.length; i++) {
+    if (re.test(arr[i])) {
+      remove(el, arr[i]);
+    }
+  }
+}
+
+function toggle (el, name) {
+  // classList
+  if (el.classList) {
+    return el.classList.toggle(name);
+  }
+
+  // fallback
+  if (has(el, name)) {
+    remove(el, name);
+  } else {
+    add(el, name);
+  }
+}
+
+},{"indexof":170}],170:[function(require,module,exports){
+
+var indexOf = [].indexOf;
+
+module.exports = function(arr, obj){
+  if (indexOf) return arr.indexOf(obj);
+  for (var i = 0; i < arr.length; ++i) {
+    if (arr[i] === obj) return i;
+  }
+  return -1;
+};
+},{}],171:[function(require,module,exports){
+module.exports=require(30)
+},{"synthetic-dom-events":172}],172:[function(require,module,exports){
+module.exports=require(31)
+},{"./init.json":173,"./types.json":174}],173:[function(require,module,exports){
+module.exports=require(32)
+},{}],174:[function(require,module,exports){
+module.exports=require(33)
+},{}],175:[function(require,module,exports){
+var inherits = require('inherits');
+var EventEmitter = require('events').EventEmitter;
+var defined = require('defined');
+var raf = require('raf');
+
+module.exports = Engine;
+inherits(Engine, EventEmitter);
+
+function Engine (opts, fn) {
+    if (!(this instanceof Engine)) return new Engine(opts, fn);
+    EventEmitter.call(this);
+    
+    if (typeof opts === 'function') {
+        fn = opts;
+        opts = {};
+    }
+    if (!opts) opts = {};
+    
+    this.running = false;
+    this.last = Date.now();
+    this.time = 0;
+    this._timers = [];
+    this._timerId = 1;
+    this._fpsTarget = defined(opts.fps, 60);
+    this._fpsWindow = defined(opts.fpsWindow, 1000);
+    this._info = null;
+    this.fps = 0;
+    this._requestFrame = opts.requestFrame || raf;
+    
+    if (fn) this.on('tick', fn);
+}
+
+Engine.prototype.run = function () {
+    var self = this;
+    if (this.running) return;
+    this.running = true;
+    this.last = Date.now();
+    this._info = { frames: 0, start: this.last };
+    
+    (function tick () {
+        if (!self.running) return;
+        self.tick();
+        var elapsed = (Date.now() - self.last) / 1000;
+        var delay = Math.max(0, (1 / self._fpsTarget) - elapsed);
+        var dms = Math.floor(delay * 1000);
+        if (dms <= 4) self._requestFrame(tick)
+        else setTimeout(function () { self._requestFrame(tick) }, dms)
+    })();
+};
+
+Engine.prototype.pause = function () {
+    this.running = false;
+};
+
+Engine.prototype.toggle = function () {
+    if (this.running) this.pause()
+    else this.run()
+};
+
+Engine.prototype.tick = function () {
+    if (!this.running) return;
+    
+    var now = Date.now();
+    var dt = now - this.last;
+    this.last = now;
+    this.time += dt;
+    this.emit('tick', dt);
+    
+    if (this._info && this._fpsWindow
+    && now - this._info.start > this._fpsWindow) {
+        this.fps = this._info.frames / this._fpsWindow * 1000;
+        this._info = { frames: 0, start: now };
+        this.emit('fps', this.fps);
+    }
+    if (this._info) { this._info.frames ++ }
+    
+    do {
+        var called = false;
+        for (var i = 0; i < this._timers.length; i++) {
+            var t = this._timers[i];
+            if (t.time <= this.time) {
+                var c = this._cleared && this._cleared[t.id];
+                if (!c) {
+                    called = true;
+                    t.fn();
+                }
+                this._timers.splice(i, 1);
+                i --;
+            }
+            else break;
+        }
+    } while (called);
+    this._cleared = null;
+};
+
+Engine.prototype.setTimeout = function (fn, ts) {
+    var id = this._timerId ++;
+    this._pushTimer({ fn: fn, time: this.time + ts, id: id });
+    return id;
+};
+
+Engine.prototype._pushTimer = function (rec) {
+    for (var i = 0; i < this._timers.length; i++) {
+        var t = this._timers[i];
+        if (rec.time < t.time) {
+            this._timers.splice(i, 0, rec);
+            return;
+        }
+    }
+    this._timers.push(rec);
+};
+
+Engine.prototype.setInterval = function (fn, ts) {
+    var self = this;
+    var first = self.time, times = 1;
+    var f = function () {
+        fn();
+        self._pushTimer({ fn: f, time: first + (++ times) * ts, id: id });
+    };
+    var id = this._timerId ++;
+    this._pushTimer({ fn: f, time: first + ts, id: id });
+    return id;
+};
+
+Engine.prototype.clearTimeout =
+Engine.prototype.clearInterval = function (id) {
+    for (var i = 0; i < this._timers.length; i++) {
+        var t = this._timers[i];
+        if (t.id === id) {
+            if (!this._cleared) this._cleared = {};
+            this._cleared[id] = true;
+            this._timers.splice(i, 1);
+            break;
+        }
+    }
+};
+
+},{"defined":176,"events":337,"inherits":177,"raf":178}],176:[function(require,module,exports){
+module.exports = function () {
+    for (var i = 0; i < arguments.length; i++) {
+        if (arguments[i] !== undefined) return arguments[i];
+    }
+};
+
+},{}],177:[function(require,module,exports){
+module.exports=require(143)
+},{}],178:[function(require,module,exports){
+var now = require('performance-now')
+  , global = typeof window === 'undefined' ? {} : window
+  , vendors = ['moz', 'webkit']
+  , suffix = 'AnimationFrame'
+  , raf = global['request' + suffix]
+  , caf = global['cancel' + suffix] || global['cancelRequest' + suffix]
+  , native = true
+
+for(var i = 0; i < vendors.length && !raf; i++) {
+  raf = global[vendors[i] + 'Request' + suffix]
+  caf = global[vendors[i] + 'Cancel' + suffix]
+      || global[vendors[i] + 'CancelRequest' + suffix]
+}
+
+// Some versions of FF have rAF but not cAF
+if(!raf || !caf) {
+  native = false
+
+  var last = 0
+    , id = 0
+    , queue = []
+    , frameDuration = 1000 / 60
+
+  raf = function(callback) {
+    if(queue.length === 0) {
+      var _now = now()
+        , next = Math.max(0, frameDuration - (_now - last))
+      last = next + _now
+      setTimeout(function() {
+        var cp = queue.slice(0)
+        // Clear queue here to prevent
+        // callbacks from appending listeners
+        // to the current frame's queue
+        queue.length = 0
+        for(var i = 0; i < cp.length; i++) {
+          if(!cp[i].cancelled) {
+            try{
+              cp[i].callback(last)
+            } catch(e) {
+              setTimeout(function() { throw e }, 0)
+            }
+          }
+        }
+      }, Math.round(next))
+    }
+    queue.push({
+      handle: ++id,
+      callback: callback,
+      cancelled: false
+    })
+    return id
+  }
+
+  caf = function(handle) {
+    for(var i = 0; i < queue.length; i++) {
+      if(queue[i].handle === handle) {
+        queue[i].cancelled = true
+      }
+    }
+  }
+}
+
+module.exports = function(fn) {
+  // Wrap in a new function to prevent
+  // `cancel` potentially being assigned
+  // to the native rAF function
+  if(!native) {
+    return raf.call(global, fn)
+  }
+  return raf.call(global, function() {
+    try{
+      fn.apply(this, arguments)
+    } catch(e) {
+      setTimeout(function() { throw e }, 0)
+    }
+  })
+}
+module.exports.cancel = function() {
+  caf.apply(global, arguments)
+}
+
+},{"performance-now":179}],179:[function(require,module,exports){
+(function (process){
+// Generated by CoffeeScript 1.6.3
+(function() {
+  var getNanoSeconds, hrtime, loadTime;
+
+  if ((typeof performance !== "undefined" && performance !== null) && performance.now) {
+    module.exports = function() {
+      return performance.now();
+    };
+  } else if ((typeof process !== "undefined" && process !== null) && process.hrtime) {
+    module.exports = function() {
+      return (getNanoSeconds() - loadTime) / 1e6;
+    };
+    hrtime = process.hrtime;
+    getNanoSeconds = function() {
+      var hr;
+      hr = hrtime();
+      return hr[0] * 1e9 + hr[1];
+    };
+    loadTime = getNanoSeconds();
+  } else if (Date.now) {
+    module.exports = function() {
+      return Date.now() - loadTime;
+    };
+    loadTime = Date.now();
+  } else {
+    module.exports = function() {
+      return new Date().getTime() - loadTime;
+    };
+    loadTime = new Date().getTime();
+  }
+
+}).call(this);
+
+/*
+//@ sourceMappingURL=performance-now.map
+*/
+
+}).call(this,require("sycGbZ"))
+},{"sycGbZ":339}],180:[function(require,module,exports){
+// Source: http://jsfiddle.net/vWx8V/
+// http://stackoverflow.com/questions/5603195/full-list-of-javascript-keycodes
+
+var has = ({}).hasOwnProperty
+
+/**
+ * Conenience method returns corresponding value for given keyName or keyCode.
+ *
+ * @param {Mixed} keyCode {Number} or keyName {String}
+ * @return {Mixed}
+ * @api public
+ */
+
+exports = module.exports = function(searchInput) {
+  // Keyboard Events
+  if (searchInput && 'object' === typeof searchInput) {
+    var hasKeyCode = searchInput.which || searchInput.keyCode || searchInput.charCode
+    if (hasKeyCode) searchInput = hasKeyCode
+  }
+
+  // Numbers
+  if ('number' === typeof searchInput) return names[searchInput]
+
+  // Everything else (cast to string)
+  var search = String(searchInput)
+
+  // check codes
+  var foundNamedKey = codes[search.toLowerCase()]
+  if (foundNamedKey) return foundNamedKey
+
+  // check aliases
+  var foundNamedKey = aliases[search.toLowerCase()]
+  if (foundNamedKey) return foundNamedKey
+
+  // weird character?
+  if (search.length === 1) return search.charCodeAt(0)
+
+  return undefined
+}
+
+/**
+ * Get by name
+ *
+ *   exports.code['enter'] // => 13
+ */
+
+var codes = exports.code = exports.codes = {
+  'backspace': 8,
+  'tab': 9,
+  'enter': 13,
+  'shift': 16,
+  'ctrl': 17,
+  'alt': 18,
+  'pause/break': 19,
+  'caps lock': 20,
+  'esc': 27,
+  'space': 32,
+  'page up': 33,
+  'page down': 34,
+  'end': 35,
+  'home': 36,
+  'left': 37,
+  'up': 38,
+  'right': 39,
+  'down': 40,
+  'insert': 45,
+  'delete': 46,
+  'windows': 91,
+  'right click': 93,
+  'numpad *': 106,
+  'numpad +': 107,
+  'numpad -': 109,
+  'numpad .': 110,
+  'numpad /': 111,
+  'num lock': 144,
+  'scroll lock': 145,
+  'my computer': 182,
+  'my calculator': 183,
+  ';': 186,
+  '=': 187,
+  ',': 188,
+  '-': 189,
+  '.': 190,
+  '/': 191,
+  '`': 192,
+  '[': 219,
+  '\\': 220,
+  ']': 221,
+  "'": 222
+}
+
+// Helper aliases
+
+var aliases = exports.aliases = {
+  'ctl': 17,
+  'pause': 19,
+  'break': 19,
+  'caps': 20,
+  'escape': 27,
+  'pgup': 33,
+  'pgdn': 33,
+  'ins': 45,
+  'del': 46,
+  'spc': 32
+}
+
+
+/*!
+ * Programatically add the following
+ */
+
+// lower case chars
+for (i = 97; i < 123; i++) codes[String.fromCharCode(i)] = i - 32
+
+// numbers
+for (var i = 48; i < 58; i++) codes[i - 48] = i
+
+// function keys
+for (i = 1; i < 13; i++) codes['f'+i] = i + 111
+
+// numpad keys
+for (i = 0; i < 10; i++) codes['numpad '+i] = i + 96
+
+/**
+ * Get by code
+ *
+ *   exports.name[13] // => 'Enter'
+ */
+
+var names = exports.names = exports.title = {} // title for backward compat
+
+// Create reverse mapping
+for (i in codes) names[codes[i]] = i
+
+// Add aliases
+for (var alias in aliases) {
+  codes[alias] = aliases[alias]
+}
+
+},{}],181:[function(require,module,exports){
+var Timeline = require('./lib/timeline-data')
+var EventEmitter = require('events').EventEmitter
+var inherits = require('inherits')
+var indexOfName = require('./indexof-name')
+
+function EditorBase() {
+	if (!(this instanceof EditorBase))
+		return new EditorBase()
+	EventEmitter.call(this)
+	this.timelinesData = []
+	this._playhead = 0
+}
+
+inherits(EditorBase, EventEmitter)
+
+//Sets the playhead value and emits a playhead change event
+EditorBase.prototype.playhead = function(time) {
+	if (typeof time === 'number') {
+		var old = this._playhead
+		this._playhead = Math.max(0, time)
+		if (old !== this._playhead)
+			this.emit('playhead', this._playhead)
+	} else 
+		return this._playhead
+}
+
+EditorBase.prototype._generateName = function() {
+	var count = this.timelinesData.length
+	var base = 'timeline'
+	var idx
+	while ( (idx = indexOfName(this.timelinesData, base+count)) >= 0 ) 
+		count++
+	return base+count
+}
+
+//Creates a new timeline object which has { element, open, name, dispose }
+EditorBase.prototype._createTimeline = function(timeline, name) {
+	return Timeline(timeline, name)
+}
+
+EditorBase.prototype.timelineData = function(name) {
+	var idx = typeof name === 'number' ? name : indexOfName(this.timelinesData, name)
+	if (idx === -1)
+		return null
+	return this.timelinesData[idx]
+}
+
+//gets timeline by name or index
+EditorBase.prototype.timeline = function(name) {
+	var ret = this.timelineData(name)
+	return ret ? ret.timeline : null
+}
+
+EditorBase.prototype.open = function(name, show) {
+	show = show !== false
+	var ret = this.timelineData(name)
+	if (ret)
+		ret.open = show
+} 
+
+EditorBase.prototype.add = function(timeline, name) {
+	name = name||this._generateName()
+	var data = this._createTimeline(timeline, name)
+	this.timelinesData.push(data)
+	this.emit('load')
+	return data
+}
+
+module.exports = EditorBase
+},{"./indexof-name":187,"./lib/timeline-data":189,"events":337,"inherits":236}],182:[function(require,module,exports){
+var timelineHTML = "<div class=\"animations-layer timeline-row\">\n\t<div class=\"animations-header timeline-row\"></div>\n</div>"
+var propertyHTML = "<div class=\"animations-control timeline-row\"></div>"
+
+var hyperglue = require('hyperglue')
+var $ = require('dom-select')
+var classes = require('dom-classes')
+var events = require('dom-events')
+var domify = require('domify')
+
+//DOM area to visualize/edit keyframes and shape timelines
+module.exports = function(editor, timelineData) {
+	var container = domify(timelineHTML)
+
+	timelineData.propertyData.forEach(function(propData) {
+		var propElement = one(editor, timelineData, propData)
+		container.appendChild(propElement)
+	})
+
+	//show/hide this container along with the timeline element
+    timelineData.on('opened', function() {
+        classes.remove(container, 'layer-open')
+        classes.add(container, 'layer-open')
+    })
+    timelineData.on('closed', function() {
+        classes.remove(container, 'layer-open')
+    })
+
+	editor.rightPanel.appendChild(container)
+	return container
+}
+
+module.exports.one = one
+function one(editor, timelineData, propData) {
+	var prop = propData.property //the original keytime property object
+	var propElement = domify(propertyHTML)
+	propData.animationElement = propElement
+
+	var frames = prop.keyframes.frames
+	propData.keyframeData.length = 0 
+
+	for (var i=0; i<frames.length; i++) {
+		propData.addKeyframe(editor, frames[i], true)
+	}
+
+    events.on(propElement, 'mousedown', function(ev) {
+    	editor.emit('highlight-property', propData)
+    })
+
+    events.on(propElement, 'dblclick', function(ev) {
+    	ev.stopPropagation()
+    	ev.preventDefault()
+        editor.emit('keyframe-toggle', timelineData, propData)
+    })
+    return propElement
+}
+},{"dom-classes":191,"dom-events":193,"dom-select":198,"domify":200,"hyperglue":233}],183:[function(require,module,exports){
+var html = "<div class=\"timeline-control\">\n\t<span class=\"keyframe-previous\"></span><span class=\"keyframe-toggle\"></span><span class=\"keyframe-next\"></span><span class=\"name\"></span>\n\t<span class=\"easing-container\"><select class=\"easing\">\n\t\t<option value=\"quadOut\" selected>none</option>\n\t\t<option value=\"linear\">linear</option>\n\t</select></span><span class=\"control-editor\"></span>\n</div>"
+var hyperglue = require('hyperglue')
+var $ = require('dom-select')
+var classes = require('dom-classes')
+var events = require('dom-events')
+var domify = require('domify')
+
+var BaseProperty = require('../lib/property-data')
+
+//Builds a DOM element from a keytime property 
+module.exports = function(editor, timelineData, property) {
+	var ret = BaseProperty(timelineData, property)
+
+    //the element which holds buttons, name, etc.
+    var element = hyperglue(html, {
+        '.name': property.name
+    })
+    ret.element = element
+
+    var easeElement = $('.easing', element)
+    ret.easingBox = editor.createEasingSelect({ element: easeElement })
+    if (ret.easingBox) {
+        ret.easingBox.on('change', function(ev) {
+            editor.emit('select-easing', ret)
+        })
+    }
+
+    var valueEditor = editor.createValueEditor(timelineData.timeline, property)
+    var controlPanel = $('.control-editor', element)
+    if (valueEditor && valueEditor.element) {
+    	controlPanel.appendChild(valueEditor.element)
+    	ret.valueEditor = valueEditor
+
+        //set default property
+        property.value = valueEditor.value
+
+    	valueEditor.on('change', function() {
+    		var current = property.keyframes.get( editor.playhead() )
+	        if (current) { //adjust current keyframe
+                property.value = valueEditor.value
+	            current.value = valueEditor.value
+	        } 
+            // else if (property.keyframes.count === 0) { //no keyframes, adjust constant
+            //     property.value = valueEditor.value
+            // } 
+            else {
+                console.log("ADD")
+                var key = ret._createKeyframe(timelineData.timeline, editor.playhead() )
+                ret.addKeyframe(editor, key)
+            }
+            editor._updateProperties()
+    	})
+    }
+
+    var toggle = $('.keyframe-toggle', element)
+    events.on(toggle, 'click', function(ev) {
+        editor.emit('keyframe-toggle', timelineData, ret)
+    })
+
+    var next = $('.keyframe-next', element)
+    events.on(next, 'click', function(ev) {
+        editor.emit('keyframe-next', ret)
+    })
+
+    var previous = $('.keyframe-previous', element)
+    events.on(previous, 'click', function(ev) {
+        editor.emit('keyframe-previous', ret)
+    })
+
+    events.on(element, 'click', function(ev) {
+    	editor.emit('highlight-property', ret)
+    })
+
+    return ret
+}
+    
+},{"../lib/property-data":188,"dom-classes":191,"dom-events":193,"dom-select":198,"domify":200,"hyperglue":233}],184:[function(require,module,exports){
+var html = "<div class=\"timeline-layer timeline-row\">\n\t<div class=\"timeline-header\">\n\t\t<span class=\"expand\"></span>\n\t\t<span class=\"name\"></span>\n\t\t<div class=\"buttons\">\n\t\t\t<!--<span class=\"lock\">&#8226;</span>\n\t\t\t<span class=\"solo\">&#8226;</span>\n\t\t\t<span class=\"visible\">&#8226;</span>-->\n\t\t</div>\n\t</div>\n\t<div class=\"controls\">\n\t</div>\n</div>"
+var hyperglue = require('hyperglue')
+var $ = require('dom-select')
+var classes = require('dom-classes')
+var events = require('dom-events')
+var domify = require('domify')
+
+var BaseTimeline = require('../lib/timeline-data')
+var createProperty = require('./create-property')
+var createAnimation = require('./create-animation')
+
+//Builds a DOM element from a keytime instance 
+module.exports = function(editor, timeline, name) {
+	//the container for this row
+	var ret = BaseTimeline(timeline, name)
+	ret.propertyData = []
+
+    //the element which holds buttons, name, etc.
+    var element = hyperglue(html, {
+        '.name': name
+    })
+    ret.element = element
+
+    //the properties for this timeline
+    ;(timeline.properties||[]).forEach(function(p) {
+        one(editor, ret, p)
+    })
+
+    //setup events
+    var expand = $('.expand', element)
+    events.on(expand, 'click', function(ev) {
+        ev.preventDefault()
+        ret.open = !ret.open
+    })
+
+    ret.on('opened', function() {
+    	classes.remove(element, 'layer-open')
+        classes.add(element, 'layer-open')
+    })
+
+    ret.on('closed', function() {
+    	classes.remove(element, 'layer-open')
+    })
+    
+	ret.animationContainer = createAnimation(editor, ret)
+    ret.open = true
+    editor.leftPanel.appendChild(element)
+    return ret
+}
+
+function one(editor, timelineData, property) {
+    var container = $('.controls', timelineData.element)
+
+    var prop = createProperty(editor, timelineData, property)
+    timelineData.propertyData.push(prop)
+    container.appendChild(prop.element)
+}
+module.exports.one = one
+},{"../lib/timeline-data":189,"./create-animation":182,"./create-property":183,"dom-classes":191,"dom-events":193,"dom-select":198,"domify":200,"hyperglue":233}],185:[function(require,module,exports){
+var numberEditor = require('number-editor')
+var classes = require('dom-classes')
+var lerp = require('lerp')
+var EventEmitter = require('events').EventEmitter
+var events = require('dom-events')
+
+function NumberEditors(count, opt) {
+    if (!(this instanceof NumberEditors))
+        return new NumberEditors(count, opt)
+    opt = opt||{}
+    EventEmitter.call(this)
+
+    this.element = document.createElement("div")
+    classes.add(this.element, 'number-editor-group')
+    this.editors = []
+    count = count||1
+    for (var i=0; i<count; i++) {
+        var editor = numberEditor(opt)
+        classes.add(editor.element, 'number-editor')
+        
+        editor.on('change', this.emit.bind(this, 'change'))
+        editor.on('edit-start', this.emit.bind(this, 'edit-start'))
+        editor.on('edit-stop', this.emit.bind(this, 'edit-stop'))
+        this.editors.push( editor )
+        this.element.appendChild(editor.element)
+    }
+}
+
+require('inherits')(NumberEditors, EventEmitter)
+
+NumberEditors.prototype.dispose = function() {
+    this.editors.forEach(function(e) {
+        e.dispose()
+    })
+}
+
+NumberEditors.prototype.lerp = function(other, a) {
+    for (var i=0; i<other.length; i++) {
+        var e = this.editors[i]
+        e.value = lerp(e.value, other[i], a)
+    }
+}
+
+Object.defineProperty(NumberEditors.prototype, "editing", {
+    get: function() {
+        return this.editors.some(function(e) {
+            return e.editing
+        })
+    }
+})
+
+Object.defineProperty(NumberEditors.prototype, "value", {
+    get: function() {
+        if (this.editors.length === 1) {
+            return this.editors[0].value
+        } else {
+            return this.editors.map(function(e) {
+                return e.value
+            })
+        }
+    },
+    set: function(array) {
+        if (typeof array === 'number' && this.editors.length === 1) {
+            this.editors[0].value = array
+        } else {
+            if (!array)
+                debugger
+            array.forEach(function(v, i) { 
+                this.editors[i].value = v
+            }.bind(this))
+        }
+    }
+})
+
+module.exports = NumberEditors
+},{"dom-classes":191,"dom-events":193,"events":337,"inherits":236,"lerp":239,"number-editor":242}],186:[function(require,module,exports){
+var css = "/*.timeline-container {\n    width: 100%;\n}*/\n\n\n.keytime-editor-container {\n\tfont-family: 'Geneva', sans-serif;\n\tfont-size: 12px;\n\twidth: 100%;\n\theight: auto;\n\tposition: absolute;\n\tbottom: 0;\n\tcolor: #161616;\n\tleft: 0;\n\t\t\n\toverflow-y: scroll;\n\tmax-height: 150px;\n\tborder-top: 1px solid #b0b0b0;\n}\n\n/*\n\tEditors\n */\n\n.hide {\n\tdisplay: none;\n}\n\n.number-editor {\n\twidth: 40px;\n\tfont-family: 'Courier New', monospace;\n\tfont-size: 10px;\n\tletter-spacing: 0;\n\tborder: 0;\n\ttext-align: right;\n\tcolor: #4e5c60;\n\tfont-weight: bold;\n\tborder-bottom: 1px dotted #4e5c60;\n\tbackground: transparent;\n\tpadding-bottom: 0;\n\tmargin-right: 5px;\n\tmargin-left: 5px;\n\tposition: relative;\n\tbottom: 2px;\n}\n\n/*\n\n */\n\n.playhead {\n\tposition: absolute;\n\ttop: 0;\n\tleft: 0;\n\tz-index: 10;\n\tbackground: #e82121;\n\t/*box-shadow: 0 0 0 0.5px #e82121;*/\n\topacity: 0.5;\n\twidth: 2px;\n\tmargin-left: 0px;\n\theight: 100%;\n\tpointer-events: none;\n}\n\n.keyframe {\n\tposition: absolute;\n\ttop: 10px;\n\tcursor: ew-resize;\n\tleft: -0px;\n\tmargin: -4px 0 0 -4px;\n\tpadding: 0px;\n\tdisplay: inline-block;\n\tborder-radius: 50% 50%;\n\tcolor: #72aab8;\n\twidth: 8px;\n\theight: 8px;\n}\n\n/*\n\tGeneric\n */\n\n.timeline-row {\n\tline-height: 17px;\n}\n\n.timeline-layer {\n\tline-height: 17px;\n}\n\n.animations-layer {\n\tline-height: 17px;\n}\n.timeline-layer:nth-child(odd), .animations-layer:nth-child(even) { \n    background-color:#dcdcdc; \n}\n.timeline-layer:nth-child(even), .animations-layer:nth-child(odd) { \n    background-color:#c5c5c5; \n}\n.animations-layer {\n\t/*width: 200%;*/\n\t-webkit-touch-callout: none;\n\t-webkit-user-select: none;\n\t-khtml-user-select: none;\n\t-moz-user-select: none;\n\t-ms-user-select: none;\n\tuser-select: none;\n}\n/**\n * timeline\n */\n\n.timeline-container, .animations-container {\n\twidth: 50%;\n\tposition: relative;\n\tdisplay: inline-block;\n\tvertical-align: top;\n\toverflow-x: scroll;\n\toverflow-y: hidden;\n\tbox-sizing: border-box;\n\t/*border: 1px solid #b0b0b0;*/\n}\n.animations-container {\n\tcursor: default;\n}\n.timeline-container {\n\tborder-right: 1px solid #b0b0b0;\n}\n\n\n.timeline-header {\n\tdisplay: block;\n\twidth: 100%;\n\theight: 17px;\n}\n.animations-header {\n\tdisplay: inline-block;\n\twidth: 100%;\n}\n\n.timeline-header > .buttons {\n\tfloat: right;\n\tdisplay: inline-block;\n}\n\n\n/*.timeline-layer:nth-child(odd) { \n    background-color:#dcdcdc; \n}\n.timeline-layer:nth-child(even) { \n    background-color:#c5c5c5; \n}*/\n\n.timeline-control, .animations-control {\n\theight: 19px;\n\tposition: relative;\n\tbackground: white;\n\tpadding-left: 5px;\n\tpadding-right: 5px;\n \tborder-top: 1px solid #b0b0b0;\n}\n\n.controls:first-child {\n\tborder-top: 0;\n}\n\n.timeline-control > .name {\n\tposition: relative;\n\ttop: -1px;\n\tleft: 5px;\n\tdisplay: inline-block;\n}\n\n.keyframe-previous, .keyframe-next, .keyframe-toggle {\n\tfont-size: 10px;\n\tcursor: pointer;\n}\n\n\n\n.expand, .lock, .visible, .solo {\n\tfont-size: 12px;\n\tline-height: 19px;\n\tcursor: pointer;\n}\n\n.expand {\n\tpadding-left: 5px;\n}\n.visible {\n\tpadding-right: 5px;\n}\n\n.controls, .animations-control {\n\tdisplay: none;\n}\n\n.control-editor {  \n\tfloat: right;\n\ttext-align: right;\n}\n\n.timeline-layer.layer-open > .controls {\n\tdisplay: block;\n}\n\n.animations-layer.layer-open > .animations-control {\n\tdisplay: block;\n}\n.animations-layer.layer-open > .animations-control.shy {\n\tdisplay: none;\n}\n.shy {\n\tdisplay: none;\n}\n\n.layer-open > .timeline-header > .expand {\n\tfont-weight: bold;\n}\n\n\n.highlight {\n\tbackground-color: #f8f8f8;\n}\n.keyframe.highlight {\n\tcolor: #dd3f3f;\n\tbackground-color: transparent;\n}\n\n\n"
+var icons = ".keyframe-next, \n.keyframe-previous, \n.keyframe-toggle, \n.expand,\n.easing-container {\n\tdisplay: inline-block;\n\topacity: 0.6;\n\tpadding: 0;\n\tmargin: 0;\n\t/*width: 4px;*/\n\ttop: -1px;\n\tfont-family: 'Courier New', monospace;\n\tposition: relative;\n\t-webkit-transition: opacity 0.25s ease;\n\t-moz-transition: opacity 0.25s ease;\n\t-ms-transition: opacity 0.25s ease;\n\t-o-transition: opacity 0.25s ease;\n\ttransition: opacity 0.25s ease;\n}\n.keyframe-next:hover, \n.keyframe-previous:hover, \n.keyframe-toggle:hover,\n.expand:hover,\n.easing:after {\n\topacity: 1.0;\n}\n\n.keyframe-next, .keyframe-previous {\n\tpadding-right: 4px;\n\tpadding-left: 4px;\n}\n\n.keyframe-next:after, .keyframe-previous:after {\n\tfont-size: 9px;\n\tfont-weight: bold;\n}\n.keyframe-previous:after {\n\tcontent: '<';\n}\n.keyframe-next:after {\n\tcontent: '>';\n}\n.keyframe-toggle {\n\ttop: 2px;\n}\n.keyframe-toggle:after {\n\tcontent: '•';\n\tfont-size: 19px;\n}\n\n.layer-open > .timeline-header > .expand:after {\n\tcontent: '-';\n}\n.expand {\n\tpadding-left: 5px;\n\tpadding-right: 5px;\n\tposition: relative;\n\ttop: -1px;\n}\n.expand:after {\n\tfont-weight: bold;\n\tcontent: '>';\n}\n\n.keyframe:after {\n\tcontent: '\\2666';\n\tposition: relative;\n\ttop: -6px;\n\tleft: 1px;\n\tfont-weight: bold;\n\tfont-size: 14px;\n}\n\n.easing-container {\n\twidth: 65px;\n\theight: 15px;\n\tborder: 1px solid transparent;\n\tbox-sizing: border-box;\n\tbackground: #ababab;\n\tborder-radius: 2px 2px;\n\topacity: 0.25;\n\t-webkit-transition: all 0.25s ease;\n\t-moz-transition: all 0.25s ease;\n\t-ms-transition: all 0.25s ease;\n\t-o-transition: all 0.25s ease;\n\ttransition: all 0.25s ease;\n\tmargin-left: 5px;\n\tmargin-right: 0px;\n\ttext-align: center;\n\tcolor: black;\n\tpadding: 0;\n\tposition: relative;\n\ttop: 2px;\n\twhite-space: nowrap;\n\toverflow: hidden;\n\ttext-overflow: clip;\n\tfloat: right;\n}\n\n.easing {\n\tcursor: default;\n\tborder: 0;\n\tbackground: none;\n\toutline: 0;\n    -webkit-appearance:none;\n    -moz-appearance:none;\n    appearance:none;\n\twidth: 65px;\n\theight: 16px;\n\tdisplay: inline-block;\n\tfont-size: 8px;\n\tposition: relative;\n\ttop: -3px;\n\tleft: 4px;\n}\n.easing:disabled {\n\tcolor: currentColor;\n\tpointer-events: none;\n}\n\n@-moz-document url-prefix() {\n    .easing {\n        width: 75px;\n    }\n}\n.timeline-control.has-easing > .easing-container {\n\topacity: 1.0;\n}\n\n.timeline-control.has-easing > .easing-container > .easing {\n\tcursor: pointer;\n}\n\n.timeline-control.has-easing > .easing-container:hover {\n\tborder: 1px solid #969696;\n}"
+require('insert-css')(css+'\n'+icons)
+
+module.exports = require('./unstyled')
+},{"./unstyled":263,"insert-css":237}],187:[function(require,module,exports){
+module.exports = require('indexof-property')('name')
+
+},{"indexof-property":235}],188:[function(require,module,exports){
+var EventEmitter = require('events').EventEmitter
+var inherits = require('inherits')
+
+function PropertyData(timelineData, property) {
+	if (!(this instanceof PropertyData))
+		return new PropertyData(timelineData, property)
+	this.property = property
+	this.timelineData = timelineData
+	this.keyframeData = []
+	this.animationElement = null
+	this.currentKeyframe = null
+	this.valueEditor = null
+
+	EventEmitter.call(this)
+
+	this.easingBox = null
+	this.element = null
+}
+
+inherits(PropertyData, EventEmitter)
+
+PropertyData.prototype.dispose = function() {
+	if (this.animationElement && this.animationElement.parentNode) {
+		this.animationElement.parentNode.removeChild(this.animationElement)
+	}
+	if (this.valueEditor && typeof this.valueEditor.dispose === 'function')
+		this.valueEditor.dispose()
+	this.valueEditor = null
+	this.timelineData = null
+	this.keyframeData.forEach(function (k) {
+		if (k.element && k.element.parentNode)
+			k.element.parentNode.removeChild(k.element)
+	})
+	this.keyframeData.length = 0
+	this.animationElement = null
+	this.element = null
+}
+
+PropertyData.prototype.updateKeyframes = function() {
+	this.property.keyframes.sort()
+}
+
+PropertyData.prototype.updateEditor = function(value) {
+	if (this.valueEditor) {
+		this.valueEditor.value = value
+	}
+}
+
+PropertyData.prototype.getKeyframeData = function(keyframe) {
+	for (var i=0; i<this.keyframeData.length; i++) {
+		var k = this.keyframeData[i]
+		if (k.keyframe === keyframe)
+			return k
+	}
+	return null
+}
+
+PropertyData.prototype._createKeyframe = function(timeline, time) {
+	var value
+	if (this.valueEditor)
+		value = this.valueEditor.value
+	else
+		value = timeline.valueOf(time, this.property)
+	return { time: time, value: value }
+}
+
+
+PropertyData.prototype.removeKeyframeAt = function(editor, timeline, current) {
+	var property = this.property
+	var currentKey = property.keyframes.frames[current]
+    property.keyframes.splice(current, 1)
+
+    var keyData = this.getKeyframeData(currentKey)
+    if (keyData) {
+    	keyData.element.parentNode.removeChild(keyData.element)
+    }
+}
+
+PropertyData.prototype.removeKeyframe = function(editor, timeline, time) {
+	var property = this.property
+	var current = property.keyframes.getIndex(time)
+	var success = false
+
+	//determine the keyframe at that time stamp..
+	if (current !== -1) {
+        this.removeKeyframeAt(editor, timeline, current)
+        success = true
+    }
+    return success
+}
+
+PropertyData.prototype.toggleKeyframe = function(editor, timeline, time) {
+	var removed = this.removeKeyframe(editor, timeline, time)
+	if (!removed)
+    	this.addKeyframe(editor, this._createKeyframe(timeline, time))
+}
+
+PropertyData.prototype.addKeyframe = function(editor, keyframe, domOnly) {
+	var key = editor._createKeyframe(this, keyframe)
+	if (!domOnly)
+		this.property.keyframes.add(keyframe)
+	this.animationElement.appendChild(key.element)
+	this.keyframeData.push(key) 
+	editor._updateProperties() //ugly
+}
+
+module.exports = PropertyData
+},{"events":337,"inherits":236}],189:[function(require,module,exports){
+var EventEmitter = require('events').EventEmitter
+var inherits = require('inherits')
+
+function TimelineData(timeline, name) {
+	if (!(this instanceof TimelineData))
+		return new TimelineData(timeline, name)
+	EventEmitter.call(this)
+	this.timeline = timeline
+	this.propertyData = []
+	this._name = name
+	this.element = null
+	this.animationContainer = null
+	this._open = false
+}
+
+inherits(TimelineData, EventEmitter)
+
+TimelineData.prototype.dispose = function() {
+	this.propertyData.forEach(function(p) {
+		p.dispose()
+	})
+	if (this.element && this.element.parentNode)
+		this.element.parentNode.removeChild(this.element)
+	if (this.animationContainer && this.animationContainer.parentNode)
+		this.animationContainer.parentNode.removeChild(this.animationContainer)
+	this.propertyData.length = 0
+	this.timeline = null
+	this.element = null
+	this.animationContainer = null
+}
+
+Object.defineProperty(TimelineData.prototype, "name", {
+	get: function() {
+		return this._name
+	},
+	set: function(name) {
+		this._name = name
+	}
+})
+
+Object.defineProperty(TimelineData.prototype, "open", {
+	get: function() {
+		return this._open
+	},
+	set: function(open) {
+		var old = this._open
+		this._open = open
+		if (old !== this._open) {
+			if (this._open)
+				this.emit('opened')
+			else 
+				this.emit('closed')
+		}
+	}
+})
+
+module.exports = TimelineData
+},{"events":337,"inherits":236}],190:[function(require,module,exports){
+var EventEmitter = require('events').EventEmitter
+var inherits = require('inherits')
+var events = require('dom-events')
+var offset = require('mouse-event-offset')
+
+function ClickDrag(element, opt) {
+	if (!(this instanceof ClickDrag)) 
+		return new ClickDrag(element, opt)
+	opt = opt||{}
+	EventEmitter.call(this)
+
+	this.enabled = true
+	this.element = element
+	this._dragging = null
+
+	this._mousedown = mousedown.bind(this)
+	this._mousemove = mousemove.bind(this)
+	this._mouseup = mouseup.bind(this)
+
+	events.on(element, 'mousedown', this._mousedown)
+
+
+	if (opt.parent instanceof EventEmitter) {
+		opt.parent.on('mousemove', this._mousemove)
+		opt.parent.on('mouseup', this._mouseup)
+	} else {
+		opt.parent = opt.parent || document
+
+		events.on(opt.parent, 'mousemove', this._mousemove)
+		events.on(opt.parent, 'mouseup', this._mouseup)
+	}
+	this._parent = opt.parent
+}
+
+inherits(ClickDrag, EventEmitter)
+
+ClickDrag.prototype.dispose = function() {
+	if (this._parent instanceof EventEmitter) {
+		this._parent.off('mousemove', this._mousemove)
+		this._parent.off('mouseup', this._mouseup)
+	} else {
+		events.off(this._parent, 'mousemove', this._mousemove)
+		events.off(this._parent, 'mouseup', this._mouseup)
+	}
+
+	if (this.element && this.element.parentNode) 
+		this.element.parentNode.removeChild(this.element)
+	this.element = null
+}
+
+function getOffset(ev, element) {
+	return offset(ev, { clientRect: element.getBoundingClientRect() }) 
+}
+
+function empty() {
+	return { x:0, y: 0 }
+}
+
+function delta(start, off) {
+	var d = empty()
+	d.x = start.x - off.x
+	d.y = start.y - off.y
+	return d
+}
+
+function mousedown(ev) {
+	if (!this.enabled) 
+		return
+
+	if (this._dragging === null) {
+		this._dragging = ev.button
+		var off = getOffset(ev, this.element)
+		this._start = off
+
+		this.emit('start', ev, off, empty())
+	}
+}
+
+function mousemove(ev) {
+	if (!this.enabled)
+		return
+
+	if (this._dragging === ev.button) {
+		var off = getOffset(ev, this.element)
+		var d = delta(off, this._start)
+		this.emit('move', ev, off, d)
+	}
+}
+
+function mouseup(ev) {
+	if (!this.enabled)
+		return
+	if (this._dragging === ev.button) {
+		this._dragging = null
+		var off = getOffset(ev, this.element)
+		var d = delta(off, this._start)
+		this.emit('end', ev, off, d)
+	}
+}
+
+module.exports = ClickDrag
+},{"dom-events":193,"events":337,"inherits":236,"mouse-event-offset":240}],191:[function(require,module,exports){
+module.exports=require(169)
+},{"indexof":192}],192:[function(require,module,exports){
+module.exports=require(170)
+},{}],193:[function(require,module,exports){
+module.exports=require(30)
+},{"synthetic-dom-events":194}],194:[function(require,module,exports){
+module.exports=require(31)
+},{"./init.json":195,"./types.json":196}],195:[function(require,module,exports){
+module.exports=require(32)
+},{}],196:[function(require,module,exports){
+module.exports=require(33)
+},{}],197:[function(require,module,exports){
+var qwery = require("qwery");
+
+module.exports = {
+  one: one,
+  all: all
+};
+
+function all (selector, parent) {
+  return qwery(selector, parent);
+}
+
+function one (selector, parent) {
+  return all(selector, parent)[0];
+}
+
+},{"qwery":199}],198:[function(require,module,exports){
+var fallback = require('./fallback');
+
+module.exports = one;
+module.exports.all = all;
+
+function one (selector, parent) {
+  parent || (parent = document);
+
+  if (parent.querySelector) {
+    return parent.querySelector(selector);
+  }
+
+  return fallback.one(selector, parent);
+}
+
+function all (selector, parent) {
+  parent || (parent = document);
+
+  if (parent.querySelectorAll) {
+    return parent.querySelectorAll(selector);
+  }
+
+  return fallback.all(selector, parent);
+}
+
+},{"./fallback":197}],199:[function(require,module,exports){
+/*!
+  * @preserve Qwery - A Blazing Fast query selector engine
+  * https://github.com/ded/qwery
+  * copyright Dustin Diaz 2012
+  * MIT License
+  */
+
+(function (name, context, definition) {
+  if (typeof module != 'undefined' && module.exports) module.exports = definition()
+  else if (typeof define == 'function' && define.amd) define(definition)
+  else context[name] = definition()
+})('qwery', this, function () {
+  var doc = document
+    , html = doc.documentElement
+    , byClass = 'getElementsByClassName'
+    , byTag = 'getElementsByTagName'
+    , qSA = 'querySelectorAll'
+    , useNativeQSA = 'useNativeQSA'
+    , tagName = 'tagName'
+    , nodeType = 'nodeType'
+    , select // main select() method, assign later
+
+    , id = /#([\w\-]+)/
+    , clas = /\.[\w\-]+/g
+    , idOnly = /^#([\w\-]+)$/
+    , classOnly = /^\.([\w\-]+)$/
+    , tagOnly = /^([\w\-]+)$/
+    , tagAndOrClass = /^([\w]+)?\.([\w\-]+)$/
+    , splittable = /(^|,)\s*[>~+]/
+    , normalizr = /^\s+|\s*([,\s\+\~>]|$)\s*/g
+    , splitters = /[\s\>\+\~]/
+    , splittersMore = /(?![\s\w\-\/\?\&\=\:\.\(\)\!,@#%<>\{\}\$\*\^'"]*\]|[\s\w\+\-]*\))/
+    , specialChars = /([.*+?\^=!:${}()|\[\]\/\\])/g
+    , simple = /^(\*|[a-z0-9]+)?(?:([\.\#]+[\w\-\.#]+)?)/
+    , attr = /\[([\w\-]+)(?:([\|\^\$\*\~]?\=)['"]?([ \w\-\/\?\&\=\:\.\(\)\!,@#%<>\{\}\$\*\^]+)["']?)?\]/
+    , pseudo = /:([\w\-]+)(\(['"]?([^()]+)['"]?\))?/
+    , easy = new RegExp(idOnly.source + '|' + tagOnly.source + '|' + classOnly.source)
+    , dividers = new RegExp('(' + splitters.source + ')' + splittersMore.source, 'g')
+    , tokenizr = new RegExp(splitters.source + splittersMore.source)
+    , chunker = new RegExp(simple.source + '(' + attr.source + ')?' + '(' + pseudo.source + ')?')
+
+  var walker = {
+      ' ': function (node) {
+        return node && node !== html && node.parentNode
+      }
+    , '>': function (node, contestant) {
+        return node && node.parentNode == contestant.parentNode && node.parentNode
+      }
+    , '~': function (node) {
+        return node && node.previousSibling
+      }
+    , '+': function (node, contestant, p1, p2) {
+        if (!node) return false
+        return (p1 = previous(node)) && (p2 = previous(contestant)) && p1 == p2 && p1
+      }
+    }
+
+  function cache() {
+    this.c = {}
+  }
+  cache.prototype = {
+    g: function (k) {
+      return this.c[k] || undefined
+    }
+  , s: function (k, v, r) {
+      v = r ? new RegExp(v) : v
+      return (this.c[k] = v)
+    }
+  }
+
+  var classCache = new cache()
+    , cleanCache = new cache()
+    , attrCache = new cache()
+    , tokenCache = new cache()
+
+  function classRegex(c) {
+    return classCache.g(c) || classCache.s(c, '(^|\\s+)' + c + '(\\s+|$)', 1)
+  }
+
+  // not quite as fast as inline loops in older browsers so don't use liberally
+  function each(a, fn) {
+    var i = 0, l = a.length
+    for (; i < l; i++) fn(a[i])
+  }
+
+  function flatten(ar) {
+    for (var r = [], i = 0, l = ar.length; i < l; ++i) arrayLike(ar[i]) ? (r = r.concat(ar[i])) : (r[r.length] = ar[i])
+    return r
+  }
+
+  function arrayify(ar) {
+    var i = 0, l = ar.length, r = []
+    for (; i < l; i++) r[i] = ar[i]
+    return r
+  }
+
+  function previous(n) {
+    while (n = n.previousSibling) if (n[nodeType] == 1) break;
+    return n
+  }
+
+  function q(query) {
+    return query.match(chunker)
+  }
+
+  // called using `this` as element and arguments from regex group results.
+  // given => div.hello[title="world"]:foo('bar')
+  // div.hello[title="world"]:foo('bar'), div, .hello, [title="world"], title, =, world, :foo('bar'), foo, ('bar'), bar]
+  function interpret(whole, tag, idsAndClasses, wholeAttribute, attribute, qualifier, value, wholePseudo, pseudo, wholePseudoVal, pseudoVal) {
+    var i, m, k, o, classes
+    if (this[nodeType] !== 1) return false
+    if (tag && tag !== '*' && this[tagName] && this[tagName].toLowerCase() !== tag) return false
+    if (idsAndClasses && (m = idsAndClasses.match(id)) && m[1] !== this.id) return false
+    if (idsAndClasses && (classes = idsAndClasses.match(clas))) {
+      for (i = classes.length; i--;) if (!classRegex(classes[i].slice(1)).test(this.className)) return false
+    }
+    if (pseudo && qwery.pseudos[pseudo] && !qwery.pseudos[pseudo](this, pseudoVal)) return false
+    if (wholeAttribute && !value) { // select is just for existance of attrib
+      o = this.attributes
+      for (k in o) {
+        if (Object.prototype.hasOwnProperty.call(o, k) && (o[k].name || k) == attribute) {
+          return this
+        }
+      }
+    }
+    if (wholeAttribute && !checkAttr(qualifier, getAttr(this, attribute) || '', value)) {
+      // select is for attrib equality
+      return false
+    }
+    return this
+  }
+
+  function clean(s) {
+    return cleanCache.g(s) || cleanCache.s(s, s.replace(specialChars, '\\$1'))
+  }
+
+  function checkAttr(qualify, actual, val) {
+    switch (qualify) {
+    case '=':
+      return actual == val
+    case '^=':
+      return actual.match(attrCache.g('^=' + val) || attrCache.s('^=' + val, '^' + clean(val), 1))
+    case '$=':
+      return actual.match(attrCache.g('$=' + val) || attrCache.s('$=' + val, clean(val) + '$', 1))
+    case '*=':
+      return actual.match(attrCache.g(val) || attrCache.s(val, clean(val), 1))
+    case '~=':
+      return actual.match(attrCache.g('~=' + val) || attrCache.s('~=' + val, '(?:^|\\s+)' + clean(val) + '(?:\\s+|$)', 1))
+    case '|=':
+      return actual.match(attrCache.g('|=' + val) || attrCache.s('|=' + val, '^' + clean(val) + '(-|$)', 1))
+    }
+    return 0
+  }
+
+  // given a selector, first check for simple cases then collect all base candidate matches and filter
+  function _qwery(selector, _root) {
+    var r = [], ret = [], i, l, m, token, tag, els, intr, item, root = _root
+      , tokens = tokenCache.g(selector) || tokenCache.s(selector, selector.split(tokenizr))
+      , dividedTokens = selector.match(dividers)
+
+    if (!tokens.length) return r
+
+    token = (tokens = tokens.slice(0)).pop() // copy cached tokens, take the last one
+    if (tokens.length && (m = tokens[tokens.length - 1].match(idOnly))) root = byId(_root, m[1])
+    if (!root) return r
+
+    intr = q(token)
+    // collect base candidates to filter
+    els = root !== _root && root[nodeType] !== 9 && dividedTokens && /^[+~]$/.test(dividedTokens[dividedTokens.length - 1]) ?
+      function (r) {
+        while (root = root.nextSibling) {
+          root[nodeType] == 1 && (intr[1] ? intr[1] == root[tagName].toLowerCase() : 1) && (r[r.length] = root)
+        }
+        return r
+      }([]) :
+      root[byTag](intr[1] || '*')
+    // filter elements according to the right-most part of the selector
+    for (i = 0, l = els.length; i < l; i++) {
+      if (item = interpret.apply(els[i], intr)) r[r.length] = item
+    }
+    if (!tokens.length) return r
+
+    // filter further according to the rest of the selector (the left side)
+    each(r, function (e) { if (ancestorMatch(e, tokens, dividedTokens)) ret[ret.length] = e })
+    return ret
+  }
+
+  // compare element to a selector
+  function is(el, selector, root) {
+    if (isNode(selector)) return el == selector
+    if (arrayLike(selector)) return !!~flatten(selector).indexOf(el) // if selector is an array, is el a member?
+
+    var selectors = selector.split(','), tokens, dividedTokens
+    while (selector = selectors.pop()) {
+      tokens = tokenCache.g(selector) || tokenCache.s(selector, selector.split(tokenizr))
+      dividedTokens = selector.match(dividers)
+      tokens = tokens.slice(0) // copy array
+      if (interpret.apply(el, q(tokens.pop())) && (!tokens.length || ancestorMatch(el, tokens, dividedTokens, root))) {
+        return true
+      }
+    }
+    return false
+  }
+
+  // given elements matching the right-most part of a selector, filter out any that don't match the rest
+  function ancestorMatch(el, tokens, dividedTokens, root) {
+    var cand
+    // recursively work backwards through the tokens and up the dom, covering all options
+    function crawl(e, i, p) {
+      while (p = walker[dividedTokens[i]](p, e)) {
+        if (isNode(p) && (interpret.apply(p, q(tokens[i])))) {
+          if (i) {
+            if (cand = crawl(p, i - 1, p)) return cand
+          } else return p
+        }
+      }
+    }
+    return (cand = crawl(el, tokens.length - 1, el)) && (!root || isAncestor(cand, root))
+  }
+
+  function isNode(el, t) {
+    return el && typeof el === 'object' && (t = el[nodeType]) && (t == 1 || t == 9)
+  }
+
+  function uniq(ar) {
+    var a = [], i, j;
+    o:
+    for (i = 0; i < ar.length; ++i) {
+      for (j = 0; j < a.length; ++j) if (a[j] == ar[i]) continue o
+      a[a.length] = ar[i]
+    }
+    return a
+  }
+
+  function arrayLike(o) {
+    return (typeof o === 'object' && isFinite(o.length))
+  }
+
+  function normalizeRoot(root) {
+    if (!root) return doc
+    if (typeof root == 'string') return qwery(root)[0]
+    if (!root[nodeType] && arrayLike(root)) return root[0]
+    return root
+  }
+
+  function byId(root, id, el) {
+    // if doc, query on it, else query the parent doc or if a detached fragment rewrite the query and run on the fragment
+    return root[nodeType] === 9 ? root.getElementById(id) :
+      root.ownerDocument &&
+        (((el = root.ownerDocument.getElementById(id)) && isAncestor(el, root) && el) ||
+          (!isAncestor(root, root.ownerDocument) && select('[id="' + id + '"]', root)[0]))
+  }
+
+  function qwery(selector, _root) {
+    var m, el, root = normalizeRoot(_root)
+
+    // easy, fast cases that we can dispatch with simple DOM calls
+    if (!root || !selector) return []
+    if (selector === window || isNode(selector)) {
+      return !_root || (selector !== window && isNode(root) && isAncestor(selector, root)) ? [selector] : []
+    }
+    if (selector && arrayLike(selector)) return flatten(selector)
+    if (m = selector.match(easy)) {
+      if (m[1]) return (el = byId(root, m[1])) ? [el] : []
+      if (m[2]) return arrayify(root[byTag](m[2]))
+      if (hasByClass && m[3]) return arrayify(root[byClass](m[3]))
+    }
+
+    return select(selector, root)
+  }
+
+  // where the root is not document and a relationship selector is first we have to
+  // do some awkward adjustments to get it to work, even with qSA
+  function collectSelector(root, collector) {
+    return function (s) {
+      var oid, nid
+      if (splittable.test(s)) {
+        if (root[nodeType] !== 9) {
+          // make sure the el has an id, rewrite the query, set root to doc and run it
+          if (!(nid = oid = root.getAttribute('id'))) root.setAttribute('id', nid = '__qwerymeupscotty')
+          s = '[id="' + nid + '"]' + s // avoid byId and allow us to match context element
+          collector(root.parentNode || root, s, true)
+          oid || root.removeAttribute('id')
+        }
+        return;
+      }
+      s.length && collector(root, s, false)
+    }
+  }
+
+  var isAncestor = 'compareDocumentPosition' in html ?
+    function (element, container) {
+      return (container.compareDocumentPosition(element) & 16) == 16
+    } : 'contains' in html ?
+    function (element, container) {
+      container = container[nodeType] === 9 || container == window ? html : container
+      return container !== element && container.contains(element)
+    } :
+    function (element, container) {
+      while (element = element.parentNode) if (element === container) return 1
+      return 0
+    }
+  , getAttr = function () {
+      // detect buggy IE src/href getAttribute() call
+      var e = doc.createElement('p')
+      return ((e.innerHTML = '<a href="#x">x</a>') && e.firstChild.getAttribute('href') != '#x') ?
+        function (e, a) {
+          return a === 'class' ? e.className : (a === 'href' || a === 'src') ?
+            e.getAttribute(a, 2) : e.getAttribute(a)
+        } :
+        function (e, a) { return e.getAttribute(a) }
+    }()
+  , hasByClass = !!doc[byClass]
+    // has native qSA support
+  , hasQSA = doc.querySelector && doc[qSA]
+    // use native qSA
+  , selectQSA = function (selector, root) {
+      var result = [], ss, e
+      try {
+        if (root[nodeType] === 9 || !splittable.test(selector)) {
+          // most work is done right here, defer to qSA
+          return arrayify(root[qSA](selector))
+        }
+        // special case where we need the services of `collectSelector()`
+        each(ss = selector.split(','), collectSelector(root, function (ctx, s) {
+          e = ctx[qSA](s)
+          if (e.length == 1) result[result.length] = e.item(0)
+          else if (e.length) result = result.concat(arrayify(e))
+        }))
+        return ss.length > 1 && result.length > 1 ? uniq(result) : result
+      } catch (ex) { }
+      return selectNonNative(selector, root)
+    }
+    // no native selector support
+  , selectNonNative = function (selector, root) {
+      var result = [], items, m, i, l, r, ss
+      selector = selector.replace(normalizr, '$1')
+      if (m = selector.match(tagAndOrClass)) {
+        r = classRegex(m[2])
+        items = root[byTag](m[1] || '*')
+        for (i = 0, l = items.length; i < l; i++) {
+          if (r.test(items[i].className)) result[result.length] = items[i]
+        }
+        return result
+      }
+      // more complex selector, get `_qwery()` to do the work for us
+      each(ss = selector.split(','), collectSelector(root, function (ctx, s, rewrite) {
+        r = _qwery(s, ctx)
+        for (i = 0, l = r.length; i < l; i++) {
+          if (ctx[nodeType] === 9 || rewrite || isAncestor(r[i], root)) result[result.length] = r[i]
+        }
+      }))
+      return ss.length > 1 && result.length > 1 ? uniq(result) : result
+    }
+  , configure = function (options) {
+      // configNativeQSA: use fully-internal selector or native qSA where present
+      if (typeof options[useNativeQSA] !== 'undefined')
+        select = !options[useNativeQSA] ? selectNonNative : hasQSA ? selectQSA : selectNonNative
+    }
+
+  configure({ useNativeQSA: true })
+
+  qwery.configure = configure
+  qwery.uniq = uniq
+  qwery.is = is
+  qwery.pseudos = {}
+
+  return qwery
+});
+
+},{}],200:[function(require,module,exports){
+
+/**
+ * Expose `parse`.
+ */
+
+module.exports = parse;
+
+/**
+ * Wrap map from jquery.
+ */
+
+var map = {
+  legend: [1, '<fieldset>', '</fieldset>'],
+  tr: [2, '<table><tbody>', '</tbody></table>'],
+  col: [2, '<table><tbody></tbody><colgroup>', '</colgroup></table>'],
+  _default: [0, '', '']
+};
+
+map.td =
+map.th = [3, '<table><tbody><tr>', '</tr></tbody></table>'];
+
+map.option =
+map.optgroup = [1, '<select multiple="multiple">', '</select>'];
+
+map.thead =
+map.tbody =
+map.colgroup =
+map.caption =
+map.tfoot = [1, '<table>', '</table>'];
+
+map.text =
+map.circle =
+map.ellipse =
+map.line =
+map.path =
+map.polygon =
+map.polyline =
+map.rect = [1, '<svg xmlns="http://www.w3.org/2000/svg" version="1.1">','</svg>'];
+
+/**
+ * Parse `html` and return a DOM Node instance, which could be a TextNode,
+ * HTML DOM Node of some kind (<div> for example), or a DocumentFragment
+ * instance, depending on the contents of the `html` string.
+ *
+ * @param {String} html - HTML string to "domify"
+ * @param {Document} doc - The `document` instance to create the Node for
+ * @return {DOMNode} the TextNode, DOM Node, or DocumentFragment instance
+ * @api private
+ */
+
+function parse(html, doc) {
+  if ('string' != typeof html) throw new TypeError('String expected');
+
+  // default to the global `document` object
+  if (!doc) doc = document;
+
+  // tag name
+  var m = /<([\w:]+)/.exec(html);
+  if (!m) return doc.createTextNode(html);
+
+  html = html.replace(/^\s+|\s+$/g, ''); // Remove leading/trailing whitespace
+
+  var tag = m[1];
+
+  // body support
+  if (tag == 'body') {
+    var el = doc.createElement('html');
+    el.innerHTML = html;
+    return el.removeChild(el.lastChild);
+  }
+
+  // wrap map
+  var wrap = map[tag] || map._default;
+  var depth = wrap[0];
+  var prefix = wrap[1];
+  var suffix = wrap[2];
+  var el = doc.createElement('div');
+  el.innerHTML = prefix + html + suffix;
+  while (depth--) el = el.lastChild;
+
+  // one element
+  if (el.firstChild == el.lastChild) {
+    return el.removeChild(el.firstChild);
+  }
+
+  // several elements
+  var fragment = doc.createDocumentFragment();
+  while (el.firstChild) {
+    fragment.appendChild(el.removeChild(el.firstChild));
+  }
+
+  return fragment;
+}
+
+},{}],201:[function(require,module,exports){
+function backInOut(t) {
+  var f = t < 0.5
+    ? 2.0 * t
+    : 1.0 - (2.0 * t - 1.0)
+
+  var g = Math.pow(f, 3.0) - f * Math.sin(f * Math.PI)
+
+  return t < 0.5
+    ? 0.5 * g
+    : 0.5 * (1.0 - g) + 0.5
+}
+
+module.exports = backInOut
+},{}],202:[function(require,module,exports){
+function backIn(t) {
+  return Math.pow(t, 3.0) - t * Math.sin(t * Math.PI)
+}
+
+module.exports = backIn
+
+},{}],203:[function(require,module,exports){
+function backOut(t) {
+  var f = 1.0 - t
+  return 1.0 - (Math.pow(f, 3.0) - f * Math.sin(f * Math.PI))
+}
+
+module.exports = backOut
+},{}],204:[function(require,module,exports){
+var bounceOut = require('./bounce-out')
+
+function bounceInOut(t) {
+  return t < 0.5
+    ? 0.5 * (1.0 - bounceOut(1.0 - t * 2.0))
+    : 0.5 * bounceOut(t * 2.0 - 1.0) + 0.5
+}
+
+module.exports = bounceInOut
+},{"./bounce-out":206}],205:[function(require,module,exports){
+var bounceOut = require('./bounce-out')
+
+function bounceIn(t) {
+  return 1.0 - bounceOut(1.0 - t)
+}
+
+module.exports = bounceIn
+},{"./bounce-out":206}],206:[function(require,module,exports){
+function bounceOut(t) {
+  var a = 4.0 / 11.0
+  var b = 8.0 / 11.0
+  var c = 9.0 / 10.0
+
+  var ca = 4356.0 / 361.0
+  var cb = 35442.0 / 1805.0
+  var cc = 16061.0 / 1805.0
+
+  var t2 = t * t
+
+  return t < a
+    ? 7.5625 * t2
+    : t < b
+      ? 9.075 * t2 - 9.9 * t + 3.4
+      : t < c
+        ? ca * t2 - cb * t + cc
+        : 10.8 * t * t - 20.52 * t + 10.72
+}
+
+module.exports = bounceOut
+},{}],207:[function(require,module,exports){
+function circInOut(t) {
+  return t < 0.5
+    ? 0.5 * (1.0 - Math.sqrt(1.0 - 4.0 * t * t))
+    : 0.5 * (Math.sqrt((3.0 - 2.0 * t) * (2.0 * t - 1.0)) + 1.0)
+}
+
+module.exports = circInOut
+},{}],208:[function(require,module,exports){
+function circIn(t) {
+  return 1.0 - Math.sqrt(1.0 - t * t)
+}
+
+module.exports = circIn
+},{}],209:[function(require,module,exports){
+function circOut(t) {
+  return Math.sqrt((2.0 - t) * t)
+}
+
+module.exports = circOut
+},{}],210:[function(require,module,exports){
+function cubicInOut(t) {
+  return t < 0.5
+    ? 4.0 * t * t * t
+    : 0.5 * Math.pow(2.0 * t - 2.0, 3.0) + 1.0
+}
+
+module.exports = cubicInOut
+},{}],211:[function(require,module,exports){
+function cubicIn(t) {
+  return t * t * t
+}
+
+module.exports = cubicIn
+},{}],212:[function(require,module,exports){
+function cubicOut(t) {
+  var f = t - 1.0
+  return f * f * f + 1.0
+}
+
+module.exports = cubicOut
+},{}],213:[function(require,module,exports){
+function elasticInOut(t) {
+  return t < 0.5
+    ? 0.5 * Math.sin(+13.0 * Math.PI/2 * 2.0 * t) * Math.pow(2.0, 10.0 * (2.0 * t - 1.0))
+    : 0.5 * Math.sin(-13.0 * Math.PI/2 * ((2.0 * t - 1.0) + 1.0)) * Math.pow(2.0, -10.0 * (2.0 * t - 1.0)) + 1.0
+}
+
+module.exports = elasticInOut
+},{}],214:[function(require,module,exports){
+function elasticIn(t) {
+  return Math.sin(13.0 * t * Math.PI/2) * Math.pow(2.0, 10.0 * (t - 1.0))
+}
+
+module.exports = elasticIn
+},{}],215:[function(require,module,exports){
+function elasticOut(t) {
+  return Math.sin(-13.0 * (t + 1.0) * Math.PI/2) * Math.pow(2.0, -10.0 * t) + 1.0
+}
+
+module.exports = elasticOut
+},{}],216:[function(require,module,exports){
+function expoInOut(t) {
+  return (t === 0.0 || t === 1.0)
+    ? t
+    : t < 0.5
+      ? +0.5 * Math.pow(2.0, (20.0 * t) - 10.0)
+      : -0.5 * Math.pow(2.0, 10.0 - (t * 20.0)) + 1.0
+}
+
+module.exports = expoInOut
+},{}],217:[function(require,module,exports){
+function expoIn(t) {
+  return t === 0.0 ? t : Math.pow(2.0, 10.0 * (t - 1.0))
+}
+
+module.exports = expoIn
+},{}],218:[function(require,module,exports){
+function expoOut(t) {
+  return t === 1.0 ? t : 1.0 - Math.pow(2.0, -10.0 * t)
+}
+
+module.exports = expoOut
+},{}],219:[function(require,module,exports){
+module.exports = {
+	'backInOut': require('./back-in-out'),
+	'backIn': require('./back-in'),
+	'backOut': require('./back-out'),
+	'bounceInOut': require('./bounce-in-out'),
+	'bounceIn': require('./bounce-in'),
+	'bounceOut': require('./bounce-out'),
+	'circInOut': require('./circ-in-out'),
+	'circIn': require('./circ-in'),
+	'circOut': require('./circ-out'),
+	'cubicInOut': require('./cubic-in-out'),
+	'cubicIn': require('./cubic-in'),
+	'cubicOut': require('./cubic-out'),
+	'elasticInOut': require('./elastic-in-out'),
+	'elasticIn': require('./elastic-in'),
+	'elasticOut': require('./elastic-out'),
+	'expoInOut': require('./expo-in-out'),
+	'expoIn': require('./expo-in'),
+	'expoOut': require('./expo-out'),
+	'linear': require('./linear'),
+	'quadInOut': require('./quad-in-out'),
+	'quadIn': require('./quad-in'),
+	'quadOut': require('./quad-out'),
+	'quartInOut': require('./quart-in-out'),
+	'quartIn': require('./quart-in'),
+	'quartOut': require('./quart-out'),
+	'quintInOut': require('./quint-in-out'),
+	'quintIn': require('./quint-in'),
+	'quintOut': require('./quint-out'),
+	'sineInOut': require('./sine-in-out'),
+	'sineIn': require('./sine-in'),
+	'sineOut': require('./sine-out')
+}
+},{"./back-in":202,"./back-in-out":201,"./back-out":203,"./bounce-in":205,"./bounce-in-out":204,"./bounce-out":206,"./circ-in":208,"./circ-in-out":207,"./circ-out":209,"./cubic-in":211,"./cubic-in-out":210,"./cubic-out":212,"./elastic-in":214,"./elastic-in-out":213,"./elastic-out":215,"./expo-in":217,"./expo-in-out":216,"./expo-out":218,"./linear":220,"./quad-in":222,"./quad-in-out":221,"./quad-out":223,"./quart-in":225,"./quart-in-out":224,"./quart-out":226,"./quint-in":228,"./quint-in-out":227,"./quint-out":229,"./sine-in":231,"./sine-in-out":230,"./sine-out":232}],220:[function(require,module,exports){
+function linear(t) {
+  return t
+}
+
+module.exports = linear
+},{}],221:[function(require,module,exports){
+function quadInOut(t) {
+  return t > 0.5
+    ? +2.0 * t * t
+    : -2.0 * t * t + (4.0 * t) - 1.0
+}
+
+module.exports = quadInOut
+},{}],222:[function(require,module,exports){
+function quadIn(t) {
+  return t * t
+}
+
+module.exports = quadIn
+},{}],223:[function(require,module,exports){
+function quadOut(t) {
+  return -t * (t - 2.0)
+}
+
+module.exports = quadOut
+},{}],224:[function(require,module,exports){
+function quarticInOut(t) {
+  return t < 0.5
+    ? +8.0 * Math.pow(t, 4.0)
+    : -8.0 * Math.pow(t - 1.0, 4.0) + 1.0
+}
+
+module.exports = quarticInOut
+},{}],225:[function(require,module,exports){
+function quarticIn(t) {
+  return Math.pow(t, 4.0)
+}
+
+module.exports = quarticIn
+},{}],226:[function(require,module,exports){
+function quarticOut(t) {
+  return Math.pow(t - 1.0, 3.0) * (1.0 - t) + 1.0
+}
+
+module.exports = quarticOut
+},{}],227:[function(require,module,exports){
+function qinticInOut(t) {
+  return t < 0.5
+    ? +16.0 * Math.pow(t, 5.0)
+    : -0.5 * Math.pow(2.0 * t - 2.0, 5.0) + 1.0
+}
+
+module.exports = qinticInOut
+},{}],228:[function(require,module,exports){
+function qinticIn(t) {
+  return Math.pow(t, 5.0)
+}
+
+module.exports = qinticIn
+},{}],229:[function(require,module,exports){
+function qinticOut(t) {
+  return Math.pow(t - 1.0, 5.0) + 1.0
+}
+
+module.exports = qinticOut
+},{}],230:[function(require,module,exports){
+function sineInOut(t) {
+  return 0.5 * 1.0 - Math.cos(t * Math.PI)
+}
+
+module.exports = sineInOut
+},{}],231:[function(require,module,exports){
+function sineIn(t) {
+  return Math.sin((t - 1.0) * Math.PI/2) + 1.0
+}
+
+module.exports = sineIn
+},{}],232:[function(require,module,exports){
+function sineOut(t) {
+  return Math.sin(t * Math.PI/2)
+}
+
+module.exports = sineOut
+},{}],233:[function(require,module,exports){
+var domify = require('domify');
+
+module.exports = hyperglue;
+function hyperglue (src, updates) {
+    if (!updates) updates = {};
+    
+    var dom = typeof src === 'object'
+        ? [ src ]
+        : domify(src)
+    ;
+    
+    forEach(objectKeys(updates), function (selector) {
+        var value = updates[selector];
+        forEach(dom, function (d) {
+            if (selector === ':first') {
+                bind(d, value);
+            }
+            else if (/:first$/.test(selector)) {
+                var k = selector.replace(/:first$/, '');
+                var elem = d.querySelector(k);
+                if (elem) bind(elem, value);
+            }
+            else {
+                var nodes = d.querySelectorAll(selector);
+                if (nodes.length === 0) return;
+                for (var i = 0; i < nodes.length; i++) {
+                    bind(nodes[i], value);
+                }
+            }
+        });
+    });
+    
+    return dom.length === 1
+        ? dom[0]
+        : dom
+    ;
+}
+
+function bind (node, value) {
+    if (isElement(value)) {
+        node.innerHTML = '';
+        node.appendChild(value);
+    }
+    else if (isArray(value)) {
+        for (var i = 0; i < value.length; i++) {
+            var e = hyperglue(node.cloneNode(true), value[i]);
+            node.parentNode.insertBefore(e, node);
+        }
+        node.parentNode.removeChild(node);
+    }
+    else if (value && typeof value === 'object') {
+        forEach(objectKeys(value), function (key) {
+            if (key === '_text') {
+                setText(node, value[key]);
+            }
+            else if (key === '_html' && isElement(value[key])) {
+                node.innerHTML = '';
+                node.appendChild(value[key]);
+            }
+            else if (key === '_html') {
+                node.innerHTML = value[key];
+            }
+            else node.setAttribute(key, value[key]);
+        });
+    }
+    else setText(node, value);
+}
+
+function forEach(xs, f) {
+    if (xs.forEach) return xs.forEach(f);
+    for (var i = 0; i < xs.length; i++) f(xs[i], i)
+}
+
+var objectKeys = Object.keys || function (obj) {
+    var res = [];
+    for (var key in obj) res.push(key);
+    return res;
+};
+
+function isElement (e) {
+    return e && typeof e === 'object' && e.childNodes
+        && (typeof e.appendChild === 'function'
+        || typeof e.appendChild === 'object')
+    ;
+}
+
+var isArray = Array.isArray || function (xs) {
+    return Object.prototype.toString.call(xs) === '[object Array]';
+};
+
+function setText (e, s) {
+    e.innerHTML = '';
+    var txt = document.createTextNode(String(s));
+    e.appendChild(txt);
+}
+
+},{"domify":234}],234:[function(require,module,exports){
+
+/**
+ * Expose `parse`.
+ */
+
+module.exports = parse;
+
+/**
+ * Wrap map from jquery.
+ */
+
+var map = {
+  option: [1, '<select multiple="multiple">', '</select>'],
+  optgroup: [1, '<select multiple="multiple">', '</select>'],
+  legend: [1, '<fieldset>', '</fieldset>'],
+  thead: [1, '<table>', '</table>'],
+  tbody: [1, '<table>', '</table>'],
+  tfoot: [1, '<table>', '</table>'],
+  colgroup: [1, '<table>', '</table>'],
+  caption: [1, '<table>', '</table>'],
+  tr: [2, '<table><tbody>', '</tbody></table>'],
+  td: [3, '<table><tbody><tr>', '</tr></tbody></table>'],
+  th: [3, '<table><tbody><tr>', '</tr></tbody></table>'],
+  col: [2, '<table><tbody></tbody><colgroup>', '</colgroup></table>'],
+  _default: [0, '', '']
+};
+
+/**
+ * Parse `html` and return the children.
+ *
+ * @param {String} html
+ * @return {Array}
+ * @api private
+ */
+
+function parse(html) {
+  if ('string' != typeof html) throw new TypeError('String expected');
+  
+  // tag name
+  var m = /<([\w:]+)/.exec(html);
+  if (!m) throw new Error('No elements were generated.');
+  var tag = m[1];
+  
+  // body support
+  if (tag == 'body') {
+    var el = document.createElement('html');
+    el.innerHTML = html;
+    return [el.removeChild(el.lastChild)];
+  }
+  
+  // wrap map
+  var wrap = map[tag] || map._default;
+  var depth = wrap[0];
+  var prefix = wrap[1];
+  var suffix = wrap[2];
+  var el = document.createElement('div');
+  el.innerHTML = prefix + html + suffix;
+  while (depth--) el = el.lastChild;
+
+  return orphan(el.children);
+}
+
+/**
+ * Orphan `els` and return an array.
+ *
+ * @param {NodeList} els
+ * @return {Array}
+ * @api private
+ */
+
+function orphan(els) {
+  var ret = [];
+
+  while (els.length) {
+    ret.push(els[0].parentNode.removeChild(els[0]));
+  }
+
+  return ret;
+}
+
+},{}],235:[function(require,module,exports){
+module.exports = function compile(property) {
+	if (!property || typeof property !== 'string')
+		throw new Error('must specify property for indexof search')
+	return new Function('array', 'value', 'start', [
+		'start = start || 0',
+		'for (var i=start; i<array.length; i++)',
+		'  if (array[i].'+property+' === value)',
+		'      return i',
+		'return -1'
+	].join('\n'))
+}
+},{}],236:[function(require,module,exports){
+module.exports=require(143)
+},{}],237:[function(require,module,exports){
+var inserted = {};
+
+module.exports = function (css, options) {
+    if (inserted[css]) return;
+    inserted[css] = true;
+    
+    var elem = document.createElement('style');
+    elem.setAttribute('type', 'text/css');
+
+    if ('textContent' in elem) {
+      elem.textContent = css;
+    } else {
+      elem.styleSheet.cssText = css;
+    }
+    
+    var head = document.getElementsByTagName('head')[0];
+    if (options && options.prepend) {
+        head.insertBefore(elem, head.childNodes[0]);
+    } else {
+        head.appendChild(elem);
+    }
+};
+
+},{}],238:[function(require,module,exports){
+module.exports=require(180)
+},{}],239:[function(require,module,exports){
+module.exports=require(166)
+},{}],240:[function(require,module,exports){
+module.exports = function offset(ev, options) {
+    ev = ev || window.event;
+
+    var target = ev.target || ev.srcElement
+    var rect = (options && options.clientRect) || target.getBoundingClientRect(),
+        clientX = options && options.clientX,
+        clientY = options && options.clientY
+
+    clientX = typeof clientX === 'number' ? clientX : ev.clientX
+    clientY = typeof clientY === 'number' ? clientY : ev.clientY
+    
+    return { x: clientX - rect.left, y: clientY - rect.top }
+}
+},{}],241:[function(require,module,exports){
+var domval = require('dom-value')
+var keycode = require('keycode')
+
+function numeric(code, decimals) {
+    if ((code >= 48 && code <= 57) 
+        || (code >= 96 && code <= 105))
+        return true
+    if (code === 43 || code === 45
+        || code === 189 || code === 187)
+        return true
+    return decimals && code === 190
+}
+
+module.exports.keydown = function(ev) {
+    var k = keycode(ev)
+    var step = this.step
+    if (ev.metaKey||ev.controlKey)
+        step = this.step / this.stepModifier
+    else if (ev.shiftKey)
+        step = this.step * this.stepModifier
+
+    var old = this.value
+    if (k === 'up') {
+        ev.preventDefault()
+        old += step
+        this._setValue(old)
+    } else if (k === 'down') {
+        ev.preventDefault()
+        old -= step
+        this._setValue(old)
+    } else if (k === 'enter') {
+        if (!this.dragEnabled) {
+            this.stopEdit()
+        } else {
+            this.startEdit()
+            this.emit('edit')
+        }
+    }
+}
+
+module.exports.touchKeydown = function(ev) {
+    var code = ev.which || ev.keyCode
+    if (code !== 8 && !numeric(code, this.decimals > 0)) {
+        // console.log("HELLO"
+        ev.preventDefault()
+        ev.stopPropagation()
+    }
+}
+
+module.exports.dragStart = function(ev) {
+    if (this.dragEnabled) {
+        this.dragStartValue = this.value
+    }
+}
+
+module.exports.dblclick = function(opt, ev) {
+    if (this.dragEnabled) {
+        ev.preventDefault()
+        this.startEdit()
+        this.emit('edit')
+    }
+}
+
+module.exports.change = function(opt, ev) {
+    this.dragEnabled = true
+    if (this.cursor)
+        this.element.style.cursor = 'ew-resize'
+    this.element.setAttribute('readonly', 'readonly')
+    this._setValue( this._parse() )
+}
+
+module.exports.blur = function(opt, ev) {
+    if (!this.dragEnabled) {
+        this.stopEdit()
+        this.emit('blur')
+    }
+} 
+
+module.exports.dragEnd = function(opt, ev) {
+    ev.preventDefault()
+    if (this.cursor && opt.cursorParent && opt.cursorParent.style)
+        opt.cursorParent.style.cursor = 'auto'
+}
+
+module.exports.dragMove = function(opt, ev, offset, delta) {        
+    if (this.dragEnabled) {
+        ev.preventDefault()
+
+        if (this.cursor && opt.cursorParent && opt.cursorParent.style)
+            opt.cursorParent.style.cursor = 'ew-resize'
+
+        var step = 1
+        if (ev.metaKey||ev.controlKey)
+            step = 1/this.stepModifier
+        else if (ev.shiftKey)
+            step = this.stepModifier
+
+        var newVal = (this.dragStartValue + delta.x * this.dragScale * step)
+        this._setValue(newVal)
+    }
+}
+},{"dom-value":256,"keycode":259}],242:[function(require,module,exports){
+var events = require('./events')
+
+var offset = require('mouse-event-offset')
+var domval = require('dom-value')
+var clamp = require('clamp')
+var inherits = require('inherits')
+
+var EventEmitter = require('events').EventEmitter
+var draggable = require('clickdrag')
+
+var attachEvents = require('attach-dom-events')
+
+function NumberEditor(opt) {
+    if (!(this instanceof NumberEditor)) 
+        return new NumberEditor(opt)
+    opt = opt||{}
+
+    EventEmitter.call(this)
+
+    this.element = opt.element || document.createElement('input')
+    this.element.setAttribute('type', opt.touch ? 'number' : 'text')
+
+    this.min = typeof opt.min === 'number' ? opt.min : -Number.MAX_VALUE
+    this.max = typeof opt.max === 'number' ? opt.max : Number.MAX_VALUE
+    this.step = typeof opt.step === 'number' ? opt.step : 1
+    this.stepModifier = typeof opt.stepModifier === 'number' ? opt.stepModifier : 10
+    this.dragScale = typeof opt.dragScale === 'number' ? opt.dragScale : (this.step/2)
+    this.decimals = typeof opt.decimals === 'number' ? opt.decimals : 0
+    this.value = opt.value || 0
+    this.cursor = opt.cursor !== false
+
+    this.element.setAttribute("min", this.min)
+    this.element.setAttribute("max", this.max)
+    this.element.setAttribute("inputmode", "numeric")
+    if (this.decimals===0)
+        this.element.setAttribute("pattern", "[0-9]*")
+
+    this.dragStartValue = null
+
+    this.dragEnabled = true
+    this.element.style.cursor = 'ew-resize'
+
+    opt.parent = opt.parent || document
+    opt.cursorParent = document.body
+    
+    if (!opt.touch) {
+        this.element.setAttribute("readonly", "readonly")
+    
+        //setup main element events
+        attachEvents(this.element, {
+            keydown: events.keydown.bind(this),
+            dblclick: events.dblclick.bind(this, opt),
+            change: events.change.bind(this, opt),
+            blur: events.blur.bind(this, opt)
+        })
+
+        //setup mouse drag events on parent/document
+        this.drag = draggable(this.element, opt)
+        this.drag.on('start', events.dragStart.bind(this))
+        this.drag.on('end', events.dragEnd.bind(this, opt))
+        this.drag.on('move', events.dragMove.bind(this, opt))
+    } else {
+        attachEvents(this.element, {
+            keydown: events.touchKeydown.bind(this),
+            change: events.change.bind(this, opt)
+        })
+    }
+}
+
+inherits(NumberEditor, EventEmitter)
+
+NumberEditor.prototype.dispose = function() {
+    if (this.drag) 
+        this.drag.dispose()
+    if (this.element && this.element.parentNode)
+        this.element.parentNode.dispose(this.element)
+    this.element = null
+}
+
+//Opens the editor
+NumberEditor.prototype.startEdit = function() {
+    this.dragging = null
+    if (this.cursor)
+        this.element.style.cursor = 'auto'
+    this.element.removeAttribute('readonly')
+    this.dragEnabled = false
+    this.emit('edit-start')
+}
+
+NumberEditor.prototype.stopEdit = function() {
+    this.dragEnabled = true
+    if (this.cursor)
+        this.element.style.cursor = 'ew-resize'
+    this.element.setAttribute('readonly', 'readonly')
+    this.emit('edit-stop')
+}
+
+//sets the value and emits a change event
+NumberEditor.prototype._setValue = function(value) {
+    var old = this._value
+
+    this.value = value
+
+    if (old !== this._value)
+        this.emit('change', this._value)
+}
+
+NumberEditor.prototype._constrain = function(value) {
+    var newVal = clamp(Number(value), this.min, this.max)
+    if (isNaN(newVal))
+        newVal = this._value
+
+    if (this.decimals === 0)
+        newVal = Math.round(newVal)
+    return newVal
+}
+
+NumberEditor.prototype._parse = function(str) {
+    str = typeof str === 'string' ? str : String(domval(this.element))
+    return parseFloat(str, 10)
+}
+
+NumberEditor.prototype._display = function(value) {
+    return value.toFixed(this.decimals)
+}
+
+Object.defineProperty(NumberEditor.prototype, "editing", {
+    configurable: true,
+    get: function() {
+        return !this.dragEnabled
+    },
+})
+
+//does not emit change events
+Object.defineProperty(NumberEditor.prototype, "value", {
+    configurable: true,
+    get: function() {
+        return this._value
+    },
+    set: function(value) {
+        var old = this._value
+
+        this._value = this._constrain(value)
+        domval(this.element, this._display(this._value))
+    }
+})
+
+module.exports = NumberEditor
+},{"./events":241,"attach-dom-events":243,"clamp":244,"clickdrag":245,"dom-value":256,"events":337,"inherits":258,"mouse-event-offset":260}],243:[function(require,module,exports){
+var domEvents = require('dom-events')
+
+function helper(func, element, events) {
+	events = events||{}
+	for (var k in events) {
+		if (events.hasOwnProperty(k)) 
+			func(element, k, events[k])
+	}
+}
+
+var on = helper.bind(this, domEvents.on)
+
+module.exports = on
+module.exports.on = on
+module.exports.off = helper.bind(this, domEvents.off)
+module.exports.once = helper.bind(this, domEvents.once)
+},{"dom-events":252}],244:[function(require,module,exports){
+module.exports = clamp
+
+function clamp(value, min, max) {
+  return min < max
+    ? (value < min ? min : value > max ? max : value)
+    : (value < max ? max : value > min ? min : value)
+}
+
+},{}],245:[function(require,module,exports){
+module.exports=require(190)
+},{"dom-events":246,"events":337,"inherits":250,"mouse-event-offset":251}],246:[function(require,module,exports){
+module.exports=require(30)
+},{"synthetic-dom-events":247}],247:[function(require,module,exports){
+module.exports=require(31)
+},{"./init.json":248,"./types.json":249}],248:[function(require,module,exports){
+module.exports=require(32)
+},{}],249:[function(require,module,exports){
+module.exports=require(33)
+},{}],250:[function(require,module,exports){
+module.exports=require(143)
+},{}],251:[function(require,module,exports){
+module.exports=require(240)
+},{}],252:[function(require,module,exports){
+module.exports=require(30)
+},{"synthetic-dom-events":253}],253:[function(require,module,exports){
+module.exports=require(31)
+},{"./init.json":254,"./types.json":255}],254:[function(require,module,exports){
+module.exports=require(32)
+},{}],255:[function(require,module,exports){
+module.exports=require(33)
+},{}],256:[function(require,module,exports){
+
+/**
+ * Module dependencies.
+ */
+
+var typeOf = require('component-type');
+
+/**
+ * Set or get `el`'s' value.
+ *
+ * @param {Element} el
+ * @param {Mixed} val
+ * @return {Mixed}
+ * @api public
+ */
+
+module.exports = function(el, val){
+  if (2 == arguments.length) return set(el, val);
+  return get(el);
+};
+
+/**
+ * Get `el`'s value.
+ */
+
+function get(el) {
+  switch (type(el)) {
+    case 'checkbox':
+    case 'radio':
+      if (el.checked) {
+        var attr = el.getAttribute('value');
+        return null == attr ? true : attr;
+      } else {
+        return false;
+      }
+    case 'radiogroup':
+      for (var i = 0, radio; radio = el[i]; i++) {
+        if (radio.checked) return radio.value;
+      }
+      break;
+    case 'select':
+      for (var i = 0, option; option = el.options[i]; i++) {
+        if (option.selected) return option.value;
+      }
+      break;
+    default:
+      return el.value;
+  }
+}
+
+/**
+ * Set `el`'s value.
+ */
+
+function set(el, val) {
+  switch (type(el)) {
+    case 'checkbox':
+    case 'radio':
+      if (val) {
+        el.checked = true;
+      } else {
+        el.checked = false;
+      }
+      break;
+    case 'radiogroup':
+      for (var i = 0, radio; radio = el[i]; i++) {
+        radio.checked = radio.value === val;
+      }
+      break;
+    case 'select':
+      for (var i = 0, option; option = el.options[i]; i++) {
+        option.selected = option.value === val;
+      }
+      break;
+    default:
+      el.value = val;
+  }
+}
+
+/**
+ * Element type.
+ */
+
+function type(el) {
+  var group = 'array' == typeOf(el) || 'object' == typeOf(el);
+  if (group) el = el[0];
+  var name = el.nodeName.toLowerCase();
+  var type = el.getAttribute('type');
+
+  if (group && type && 'radio' == type.toLowerCase()) return 'radiogroup';
+  if ('input' == name && type && 'checkbox' == type.toLowerCase()) return 'checkbox';
+  if ('input' == name && type && 'radio' == type.toLowerCase()) return 'radio';
+  if ('select' == name) return 'select';
+  return name;
+}
+
+},{"component-type":257}],257:[function(require,module,exports){
+
+/**
+ * toString ref.
+ */
+
+var toString = Object.prototype.toString;
+
+/**
+ * Return the type of `val`.
+ *
+ * @param {Mixed} val
+ * @return {String}
+ * @api public
+ */
+
+module.exports = function(val){
+  switch (toString.call(val)) {
+    case '[object Function]': return 'function';
+    case '[object Date]': return 'date';
+    case '[object RegExp]': return 'regexp';
+    case '[object Arguments]': return 'arguments';
+    case '[object Array]': return 'array';
+    case '[object String]': return 'string';
+  }
+
+  if (val === null) return 'null';
+  if (val === undefined) return 'undefined';
+  if (val && val.nodeType === 1) return 'element';
+  if (val === Object(val)) return 'object';
+
+  return typeof val;
+};
+
+},{}],258:[function(require,module,exports){
+module.exports=require(143)
+},{}],259:[function(require,module,exports){
+module.exports=require(180)
+},{}],260:[function(require,module,exports){
+module.exports=require(240)
+},{}],261:[function(require,module,exports){
+var events = require('dom-events')
+var EventEmitter = require('events').EventEmitter
+var inherits = require('inherits')
+
+function Select(opt) {
+	if (!(this instanceof Select))
+		return new Select(opt)
+	EventEmitter.call(this)
+	opt = opt||{}
+	if (Array.isArray(opt))
+		opt = { data: opt }
+	this.element = opt.element || document.createElement("select")
+	this.data = []
+	events.on(this.element, 'change', this.emit.bind(this, 'change'))
+	
+	if (opt.data) 
+		this.set(opt.data)
+}
+
+inherits(Select, EventEmitter)
+
+Select.prototype.select = function(value) {
+	this.data.forEach(function(f) {
+		if (f.value === value)
+			f.element.setAttribute('selected', 'selected')
+		else
+			f.element.removeAttribute('selected')
+	})
+}
+
+Select.prototype.selected = function() {
+	return this.data[this.element.selectedIndex].value
+}
+
+Select.prototype.selectedIndex = function() {
+	return this.element.selectedIndex
+}
+
+Select.prototype.clear = function() {
+	this.data.length = 0
+	while (this.element.firstChild) 
+	    this.element.removeChild(this.element.firstChild);	
+}
+
+Select.prototype.set = function(data) {
+	this.clear()
+	this.add(data)
+}
+
+Select.prototype.add = function(data) {
+	this.data.length = 0
+	if (!Array.isArray(data))
+		data = [data]
+	data.forEach(function(f) {
+		var opt = document.createElement('option');
+		var settings = f
+		if (typeof f === 'string')  {
+			settings = {}
+			settings.name = f
+			settings.value = f
+		} else {
+			if (!settings.value && settings.name)
+				settings.value = settings.name 
+			else if (!settings.name && settings.value)
+				settings.name = settings.value
+		}
+		
+		opt.setAttribute('value', settings.value)
+		if (settings.disabled)
+			opt.setAttribute('disabled', 'disabled')
+		if (settings.selected)
+			opt.setAttribute('selected', 'selected')
+
+		opt.innerHTML = settings.name
+
+		settings.element = opt
+		this.data.push(settings)
+	    this.element.appendChild(opt);	
+	}.bind(this))
+} 
+
+module.exports = Select
+},{"dom-events":193,"events":337,"inherits":236}],262:[function(require,module,exports){
+module.exports = extend
+
+function extend() {
+    var target = {}
+
+    for (var i = 0; i < arguments.length; i++) {
+        var source = arguments[i]
+
+        for (var key in source) {
+            if (source.hasOwnProperty(key)) {
+                target[key] = source[key]
+            }
+        }
+    }
+
+    return target
+}
+
+},{}],263:[function(require,module,exports){
+var Base = require('./base')
+var inherits = require('inherits')
+var classes = require('dom-classes')
+var domify = require('domify')
+var clickdrag = require('clickdrag')
+var events = require('dom-events')
+var keycode = require('keycode')
+var getMouseOffset = require('mouse-event-offset')
+var xtend = require('xtend')
+
+var NumberEditors = require('./dom/number-editors')
+var createTimeline = require('./dom/create-timeline')
+var SelectBox = require('select-box')
+var eases = require('eases')
+
+var noop = function() { return null }
+
+var SCALE = 100
+
+function Editor() {
+	if (!(this instanceof Editor))
+		return new Editor()
+
+	Base.call(this)
+	
+	this.defaultConstraint = { decimals: 1 }
+	this.easings = Object.keys(eases)
+	this.easings = this.easings.filter(function(e) {
+		return e !== 'linear'
+	})
+	this.easings.unshift({ disabled: true, name: '—' })
+	this.easings.unshift('linear')
+
+	this.constraints = {}
+	this.editors = {}
+	this.shyNames = []
+	this.keyEvents = true
+	// this.editable = true
+
+    this.element = domify('<div class="keytime-editor-container">')
+    this.leftPanel = domify('<div class="timeline-container">')
+    this.rightPanel = domify('<div class="animations-container">')
+    this.element.appendChild(this.leftPanel)
+    this.element.appendChild(this.rightPanel)
+
+    this.playheadElement = domify('<div class="playhead">')
+    this.rightPanel.appendChild(this.playheadElement)
+
+    this.on('playhead', handlePlayhead.bind(this))
+    this.on('keyframe-toggle', this._toggleKeyframe.bind(this))
+    this.on('keyframe-next', keyframeNext.bind(this, true))
+    this.on('keyframe-previous', keyframeNext.bind(this, false))
+    this.on('keyframe-remove', this._removeKeyframe.bind(this))
+
+    this.on('load', handlePlayhead.bind(this))
+    this.on('load', this._updateShyLayers.bind(this))
+
+    events.on(document, 'keydown', handleKey.bind(this), false)
+    this.currentEditor = null
+
+    this.draggable = clickdrag(this.rightPanel)
+    this.propertyDrag = null
+    this.draggable.on('start', this._onDragStart.bind(this))
+    this.draggable.on('move', this._onDrag.bind(this))
+    this.draggable.on('end', onDragEnd.bind(this))
+    this.draggingKeyframe = null
+
+    this.highlightProperty = null
+    this.on('highlight-property', function(prop) {
+    	if (this.highlightProperty && prop !== this.highlightProperty) {
+    		var old = this.highlightProperty
+    		classes.remove(old.element, 'highlight')
+    		classes.remove(old.animationElement, 'highlight')
+    	}
+    	this.highlightProperty = prop
+    	classes.add(prop.element, 'highlight')
+    	classes.add(prop.animationElement, 'highlight')
+    }.bind(this))
+
+    this.on('select-easing', function(propertyData) {
+    	var ease = propertyData.easingBox.selected()
+    	if (propertyData.currentKeyframe) {
+    		propertyData.currentKeyframe.ease = ease
+    	} else {
+    		var keyframes = propertyData.property.keyframes
+    		var next = keyframes.next( this.playhead() )
+    		if (next)
+    			next.ease = ease
+    	}
+    }.bind(this))
+
+
+}
+
+inherits(Editor, Base)
+
+function handleKey(ev) {
+	if (!this.keyEvents)
+		return
+
+	var key = keycode(ev)
+	if (key === 'left') {
+		if (this.currentEditor && this.currentEditor.editing)
+			return
+
+		ev.preventDefault()
+		if (this.highlightProperty) 
+			this.emit('keyframe-previous', this.highlightProperty)
+	} else if (key === 'right') {
+		if (this.currentEditor && this.currentEditor.editing)
+			return
+		
+		ev.preventDefault()
+		if (this.highlightProperty) 
+			this.emit('keyframe-next', this.highlightProperty)
+	} else if (key === 'k') {
+		ev.preventDefault()
+		if (this.highlightProperty) 
+			this.emit('keyframe-toggle', this.highlightProperty.timelineData, this.highlightProperty)
+	} else if (key === 'delete' || key === 'backspace') {
+		if (this.currentEditor && this.currentEditor.editing)
+			return
+		
+		ev.preventDefault()
+		if (this.highlightProperty) 
+			this.emit('keyframe-remove', this.highlightProperty.timelineData, this.highlightProperty)
+	}
+}
+
+function keyframeNext(goNext, propertyData) {
+	var keyframes = propertyData.property.keyframes
+	var time = this.playhead()
+    var next = goNext ? keyframes.next(time) : keyframes.previous(time)
+    if (next) {
+        this.playhead(next.time)
+    }
+}
+
+Editor.prototype._onDragStart = function(ev, offset, delta) {
+	if (this.draggingKeyframe)
+		this.propertyDrag = this.draggingKeyframe.element.parentNode
+	else
+		this.propertyDrag = ev.target
+	this._onDrag(ev, offset, delta)
+}
+
+Editor.prototype._onDrag = function(ev, offset, delta) {
+	ev.preventDefault()	
+
+	if (!this.propertyDrag)
+		return
+
+	var rect = this.propertyDrag.getBoundingClientRect()
+    offset = getMouseOffset(ev, { clientRect: rect })
+    offset.x = Math.max(0, offset.x)
+
+	if (this.draggingKeyframe) {
+		this.draggingKeyframe.element.style.left = Math.round(offset.x)+'px'
+		this.draggingKeyframe.keyframe.time = offset.x/SCALE
+		this.draggingKeyframe.propertyData.updateKeyframes()
+		this._updateProperties()
+	} else {
+		this.playhead(offset.x / SCALE)
+	}
+}
+
+function onDragEnd(ev, offset, delta) {
+	this.draggingKeyframe = null
+	this.propertyDrag = null
+}
+
+function handlePlayhead(time) {
+	this.playheadElement.style.left = Math.round(time*SCALE)+'px'
+	this._updateProperties()
+}
+
+//Creates a new timeline object which has { element, open, name, dispose }
+Editor.prototype._createTimeline = function(timeline, name) {
+	return createTimeline(this, timeline, name)
+}
+
+Editor.prototype._updateProperties = function() {
+    var curTime = this.playhead()
+    this.timelinesData.forEach(function(tData) {
+    	var timeline = tData.timeline
+
+        tData.propertyData.forEach(function(propData) {
+        	var prop = propData.property
+			var curVal = timeline.valueOf(curTime, prop)	
+			propData.updateEditor(curVal)
+
+            var highlightIdx = prop.keyframes.getIndex(curTime)
+            var highlight = prop.keyframes.frames[highlightIdx]
+
+            propData.keyframeData.forEach(function(k) {
+            	classes.remove(k.element, 'highlight')
+            	if (k.keyframe===highlight) {
+	                classes.add(k.element, 'highlight')
+	            }
+            })
+
+            var nextFrame = highlight || prop.keyframes.next(curTime)
+            var curEase = nextFrame
+            var hasEasing = nextFrame && nextFrame !== prop.keyframes.frames[0]
+
+            classes.remove(propData.element, 'has-easing')
+            if (hasEasing) 
+            	classes.add(propData.element, 'has-easing')
+
+            if (propData.easingBox) {
+            	var box = propData.easingBox.element
+            	if (hasEasing) {
+	            	box.removeAttribute('disabled')
+	            	propData.easingBox.select(curEase.ease || 'linear')
+	            } else
+	            	box.setAttribute('disabled', 'disabled')
+	        }
+            propData.currentKeyframe = highlight
+        })
+    })
+	this.emit('update')
+}
+
+Editor.prototype.createEasingSelect = function(options) {
+	return new SelectBox(xtend(options||{}, { data: this.easings }))
+}
+
+Editor.prototype.valueEditor = function(name, func) {
+	if (!func)
+		this.editors[name] = undefined
+	else
+		this.editors[name] = func
+	return this
+}
+
+Editor.prototype.createValueEditor = function(timeline, property) {
+	var value = timeline.valueOf(0, property)
+	
+
+	var opt = this.defaultConstraint
+	var editor = null
+	var name = property.name
+	if (name in this.constraints)
+		opt = xtend(opt, this.constraints[name])
+
+	//custom editor
+	if (name in this.editors &&
+			typeof this.editors[name] === 'function') {
+		return this.editors[name](timeline, property, value, opt) 
+	}
+
+	if (typeof value === 'number') {
+		editor = NumberEditors(1, opt)
+	} else if (Array.isArray(value)) {
+		editor = NumberEditors(value.length, opt)
+	}
+	if (editor) {
+		editor.value = value
+		if (typeof editor.on === 'function') {
+			editor.on('edit-start', this._setValueEditor.bind(this, editor))
+			editor.on('edit-stop', this._clearValueEditor.bind(this))
+		}
+	}
+	return editor
+}
+
+Editor.prototype._setValueEditor = function(editor) {
+	this.currentEditor = editor
+}
+
+Editor.prototype._clearValueEditor = function() {
+	this.currentEditor = null
+}
+
+function setVisible(timelineData, vis) {
+	if (vis) {
+		classes.remove(timelineData.animationContainer, 'hide')
+		classes.remove(timelineData.element, 'hide')
+	} else {
+		classes.add(timelineData.animationContainer, 'hide')
+		classes.add(timelineData.element, 'hide')
+	}
+
+}
+
+Editor.prototype.hideAll = function() {
+	this.timelinesData.forEach(function(t) {
+		setVisible(t, false)
+	})
+}
+
+Editor.prototype.showAll = function() {
+	this.timelinesData.forEach(function(t) {
+		setVisible(t, true)
+	})
+}
+
+Editor.prototype.hide = function(name) {
+	var ret = this.timelineData(name)
+	if (ret)
+		setVisible(ret, false)
+}
+
+Editor.prototype.show = function(name) {
+	var ret = this.timelineData(name)
+	if (ret)
+		setVisible(ret, true)
+}
+
+Editor.prototype._toggleKeyframe = function(timelineData, propertyData) {
+	var time = this.playhead()
+	propertyData.toggleKeyframe(this, timelineData.timeline, time)
+	this._updateProperties()
+}
+
+Editor.prototype._removeKeyframeAt = function(timelineData, propertyData, frame) {
+	var idx = propertyData.property.keyframes.frames.indexOf(frame)
+	if (idx !== -1) {
+		propertyData.removeKeyframeAt(this, timelineData.timeline, idx)
+		this._updateProperties()		
+	}
+}
+
+Editor.prototype._removeKeyframe = function(timelineData, propertyData) {
+	var time = this.playhead()
+	propertyData.removeKeyframe(this, timelineData.timeline, time)
+	this._updateProperties()		
+}
+
+
+Editor.prototype._createKeyframe = function(propertyData, keyframe) {
+	//TODO: use keyframe-data here
+	var ret = {
+		element: domify('<figure class="keyframe">'),
+		keyframe: keyframe,
+		propertyData: propertyData
+	}
+
+	ret.element.style.left = Math.round(keyframe.time*SCALE)+'px'
+	events.on(ret.element, 'mousedown', function(ev) {
+		this.draggingKeyframe = ret
+	}.bind(this))
+	events.on(ret.element, 'dblclick', function(ev) {
+		ev.stopPropagation()
+    	ev.preventDefault()
+
+		if (ev.shiftKey) {
+			this.draggingKeyframe = null
+			this._removeKeyframeAt(propertyData.timelineData, propertyData, keyframe)
+		}
+	}.bind(this))
+	return ret
+}
+
+Editor.prototype.hide = function() {
+	classes.add(this.element, 'hide')
+}
+
+Editor.prototype.show = function() {
+	classes.remove(this.element, 'hide')
+}
+
+Editor.prototype.appendTo = function(element) {
+	element.appendChild(this.element)
+}
+
+Editor.prototype.timelines = function() {
+	return this.timelinesData.map(function(t) {
+		return { name: t.name, timeline: t.timeline.export() }
+	})
+}
+
+Editor.prototype.constraint = function(name, constraints) {
+	if (Array.isArray(name)) {
+		name.forEach(function(n) {
+			this.constraints[n] = constraints
+		}.bind(this))
+	}
+	else
+		this.constraints[name] = constraints
+}
+
+Editor.prototype.clear = function() {
+	this.timelinesData.forEach(function(t) {
+		t.dispose()
+	})
+	this.timelinesData.length = 0
+}
+
+Editor.prototype.shy = function(names) {
+	names = typeof names === 'string' ? [names] : names
+	names.forEach(function(n) {
+		if (this.shyNames.indexOf(n) === -1)
+			this.shyNames.push(n)
+	}.bind(this))
+	this._updateShyLayers()
+	return this
+}
+
+Editor.prototype._updateShyLayers = function() {
+	var shyNames = this.shyNames
+	this.timelinesData.forEach(function(t) {
+		t.propertyData.forEach(function(p) {
+			var shy = shyNames.indexOf(p.property.name) !== -1
+			classes.remove(p.element, 'shy')
+			classes.remove(p.animationElement, 'shy')
+			if (shy) {
+				classes.add(p.element, 'shy')
+				classes.add(p.animationElement, 'shy')
+			}
+		})
+	})
+}
+
+Editor.prototype.add = function(timeline, name) {
+	var ret = Base.prototype.add.call(this, timeline, name)
+	var dur = timeline.duration()
+	ret.animationContainer.style.minWidth = Math.round((dur+1.0)*SCALE)+'px'
+	return ret
+}
+
+
+Editor.prototype.removeAll = function() {
+	this.timelinesData.forEach(function(t) {
+		t.dispose()
+	})
+}
+
+module.exports = Editor
+},{"./base":181,"./dom/create-timeline":184,"./dom/number-editors":185,"clickdrag":190,"dom-classes":191,"dom-events":193,"domify":200,"eases":219,"inherits":236,"keycode":238,"mouse-event-offset":240,"select-box":261,"xtend":262}],264:[function(require,module,exports){
+var lerp = require('lerp-array')
+var Property = require('./property')
+
+function indexOfName(list, name) {
+	for (var i=0; i<list.length; i++)
+		if (list[i].name === name)
+			return i
+	return -1
+}
+
+function TimelineBase(data) {
+	if (!(this instanceof TimelineBase))
+		return new TimelineBase(data)
+	
+	this.properties = []
+
+	if (data)
+		this.load(data)
+}
+
+TimelineBase.prototype.dispose = function() {
+	this.properties.forEach(function(p) {
+		p.dispose()
+	})
+	this.properties.length = 0 
+}
+
+TimelineBase.prototype.addProperty = function(propData) {
+	this.properties.push(new Property(propData))
+}
+
+
+//Finds the max duration of all properties
+TimelineBase.prototype.duration = function() {
+	var maxTime = 0
+	for (var j=0; j<this.properties.length; j++) {
+		var prop = this.properties[j]
+		var frames = prop.keyframes.frames
+		for (var i=0; i<frames.length; i++) 
+			maxTime = Math.max(frames[i].time, maxTime)
+	}
+	return maxTime
+}
+
+//Returns the first control by the specified name or index
+TimelineBase.prototype.property = function(prop) {
+	var idx = typeof prop === 'number' ? prop : indexOfName(this.properties, prop)
+	return idx<0 ? undefined : this.properties[idx]
+}
+
+//Loads timeline animation data
+TimelineBase.prototype.load = function(data) {
+	this.dispose()
+
+	if (!data)
+		return
+
+	this.properties = data.map(function(d) {
+		return new Property(d)
+	})
+}
+
+TimelineBase.prototype.export = function() {
+	return this.properties.map(function(p) {
+		return p.export()
+	})
+}
+
+//Eases the time; by default only linear ease is supported (entry point exposes others)
+TimelineBase.prototype.ease = function(name, t) {
+	return t
+}
+
+//Interpolate between two frames; subclasses can override to provide custom 
+//interpolators (e.g. quaternions, paths, etc)
+TimelineBase.prototype.interpolate = function(property, frame1, frame2, t) {
+	return lerp(frame1.value, frame2.value, t)
+}
+
+//Determine the value at the given time stamp of the specified property
+TimelineBase.prototype.valueOf = function(time, property) {
+	var keys = property.keyframes,
+		v = keys.interpolation(time),
+		v0 = v[0],
+		v1 = v[1],
+		t = v[2]
+
+	//return default value of property
+	if (v0 === -1 || v1 === -1)
+		return property.value
+
+	var start = keys.frames[v0],
+		end = keys.frames[v1]
+
+	//frames match, return the first
+	if (v0 === v1)
+		return start.value
+
+	//ease and interpolate frames
+	else {
+		var easeName = end.ease
+		if (easeName) //remap time with easing equation
+			t = this.ease(easeName, t)
+		return this.interpolate(property, start, end, t)
+	}
+}
+
+//Convenience to get the values of all properties at a given time stamp
+TimelineBase.prototype.values = function(time, out) {
+	if (!out)
+		out = {}
+	for (var i=0; i<this.properties.length; i++) {
+		var prop = this.properties[i]
+		out[prop.name] = this.valueOf(time, prop)
+	}
+	return out
+}
+
+module.exports = TimelineBase
+},{"./property":301,"lerp-array":299}],265:[function(require,module,exports){
+var eases = require('eases')
+var inherits = require('inherits')
+var Base = require('./base')
+
+function BasicTimeline(data) {
+	if (!(this instanceof BasicTimeline))
+		return new BasicTimeline(data)
+	Base.call(this, data)
+}
+
+inherits(BasicTimeline, Base)
+
+BasicTimeline.prototype.ease = function(name, t) {
+	return eases[name](t)
+}
+
+module.exports = BasicTimeline
+},{"./base":264,"eases":284,"inherits":298}],266:[function(require,module,exports){
+module.exports=require(201)
+},{}],267:[function(require,module,exports){
+module.exports=require(202)
+},{}],268:[function(require,module,exports){
+module.exports=require(203)
+},{}],269:[function(require,module,exports){
+module.exports=require(204)
+},{"./bounce-out":271}],270:[function(require,module,exports){
+module.exports=require(205)
+},{"./bounce-out":271}],271:[function(require,module,exports){
+module.exports=require(206)
+},{}],272:[function(require,module,exports){
+module.exports=require(207)
+},{}],273:[function(require,module,exports){
+module.exports=require(208)
+},{}],274:[function(require,module,exports){
+module.exports=require(209)
+},{}],275:[function(require,module,exports){
+module.exports=require(210)
+},{}],276:[function(require,module,exports){
+module.exports=require(211)
+},{}],277:[function(require,module,exports){
+module.exports=require(212)
+},{}],278:[function(require,module,exports){
+module.exports=require(213)
+},{}],279:[function(require,module,exports){
+module.exports=require(214)
+},{}],280:[function(require,module,exports){
+module.exports=require(215)
+},{}],281:[function(require,module,exports){
+module.exports=require(216)
+},{}],282:[function(require,module,exports){
+module.exports=require(217)
+},{}],283:[function(require,module,exports){
+module.exports=require(218)
+},{}],284:[function(require,module,exports){
+module.exports=require(219)
+},{"./back-in":267,"./back-in-out":266,"./back-out":268,"./bounce-in":270,"./bounce-in-out":269,"./bounce-out":271,"./circ-in":273,"./circ-in-out":272,"./circ-out":274,"./cubic-in":276,"./cubic-in-out":275,"./cubic-out":277,"./elastic-in":279,"./elastic-in-out":278,"./elastic-out":280,"./expo-in":282,"./expo-in-out":281,"./expo-out":283,"./linear":285,"./quad-in":287,"./quad-in-out":286,"./quad-out":288,"./quart-in":290,"./quart-in-out":289,"./quart-out":291,"./quint-in":293,"./quint-in-out":292,"./quint-out":294,"./sine-in":296,"./sine-in-out":295,"./sine-out":297}],285:[function(require,module,exports){
+module.exports=require(220)
+},{}],286:[function(require,module,exports){
+module.exports=require(221)
+},{}],287:[function(require,module,exports){
+module.exports=require(222)
+},{}],288:[function(require,module,exports){
+module.exports=require(223)
+},{}],289:[function(require,module,exports){
+module.exports=require(224)
+},{}],290:[function(require,module,exports){
+module.exports=require(225)
+},{}],291:[function(require,module,exports){
+module.exports=require(226)
+},{}],292:[function(require,module,exports){
+module.exports=require(227)
+},{}],293:[function(require,module,exports){
+module.exports=require(228)
+},{}],294:[function(require,module,exports){
+module.exports=require(229)
+},{}],295:[function(require,module,exports){
+module.exports=require(230)
+},{}],296:[function(require,module,exports){
+module.exports=require(231)
+},{}],297:[function(require,module,exports){
+module.exports=require(232)
+},{}],298:[function(require,module,exports){
+module.exports=require(143)
+},{}],299:[function(require,module,exports){
+module.exports=require(165)
+},{"lerp":300}],300:[function(require,module,exports){
+module.exports=require(166)
+},{}],301:[function(require,module,exports){
+//a "Property" maintains a set of tweenable values
+//for e.g.:
+//  position [x, y]
+//  color [r, g, b, a]
+//  alpha [a]
+
+var keyframes = require('keyframes')
+var DEFAULT_TYPE = 'array'
+
+function Property(data) {
+	if (!(this instanceof Property)) 
+		return new Property(data)
+
+	this.keyframes = keyframes()
+	this.value = null
+	this.type = DEFAULT_TYPE
+	this.name = ''
+	if (data)
+		this.load(data)
+}
+
+Property.prototype.dispose = function() {
+	this.keyframes.clear()
+}
+
+Property.prototype.export = function() {
+	return {
+		name: this.name,
+		type: this.type,
+		value: this.value,
+		keyframes: this.keyframes.frames
+	}
+}
+
+Property.prototype.load = function(data) {
+	this.dispose()
+
+	if (!data)
+		return
+	
+	this.name = data.name
+	this.type = typeof data.type === 'string' ? data.type : DEFAULT_TYPE
+	this.value = data.value
+	if (data.keyframes)
+		this.keyframes.frames = data.keyframes
+}
+
+module.exports = Property
+},{"keyframes":164}],302:[function(require,module,exports){
+module.exports=require(166)
+},{}],303:[function(require,module,exports){
 var xtend = require('xtend')
 
 var defaults = {
@@ -9302,26 +13138,9 @@ module.exports = function mixes(ctor, entries) {
 }
 
 module.exports.mix = mix
-},{"xtend":162}],162:[function(require,module,exports){
-module.exports = extend
-
-function extend() {
-    var target = {}
-
-    for (var i = 0; i < arguments.length; i++) {
-        var source = arguments[i]
-
-        for (var key in source) {
-            if (source.hasOwnProperty(key)) {
-                target[key] = source[key]
-            }
-        }
-    }
-
-    return target
-}
-
-},{}],163:[function(require,module,exports){
+},{"xtend":304}],304:[function(require,module,exports){
+module.exports=require(262)
+},{}],305:[function(require,module,exports){
 function premultiply(rgba, out) {
 	if (!out)
 		out = [0,0,0,0]
@@ -9332,7 +13151,7 @@ function premultiply(rgba, out) {
 	return out
 }
 module.exports = premultiply
-},{}],164:[function(require,module,exports){
+},{}],306:[function(require,module,exports){
 var mixes = require('mixes');
 var SimplexNoise = require('simplex-noise');
 var lerp = require('lerp');
@@ -9449,22 +13268,15 @@ mixes(NoiseSampler, {
 });
 
 module.exports = NoiseSampler;
-},{"clamp":165,"lerp":166,"mixes":167,"sampling":169,"simplex-noise":172}],165:[function(require,module,exports){
-module.exports = clamp
-
-function clamp(value, min, max) {
-  return min < max
-    ? (value < min ? min : value > max ? max : value)
-    : (value < max ? max : value > min ? min : value)
-}
-
-},{}],166:[function(require,module,exports){
-module.exports=require(160)
-},{}],167:[function(require,module,exports){
-module.exports=require(161)
-},{"xtend":168}],168:[function(require,module,exports){
-module.exports=require(162)
-},{}],169:[function(require,module,exports){
+},{"clamp":307,"lerp":308,"mixes":309,"sampling":311,"simplex-noise":314}],307:[function(require,module,exports){
+module.exports=require(244)
+},{}],308:[function(require,module,exports){
+module.exports=require(166)
+},{}],309:[function(require,module,exports){
+module.exports=require(303)
+},{"xtend":310}],310:[function(require,module,exports){
+module.exports=require(262)
+},{}],311:[function(require,module,exports){
 var lerp = require('lerp');
 var smoothstep = require('smoothstep');
 
@@ -9506,15 +13318,15 @@ module.exports.bilinear = function(data, width, height, x, y) {
     var v = lerp( nx0, nx1, sy );
     return v;
 }; 
-},{"lerp":170,"smoothstep":171}],170:[function(require,module,exports){
-module.exports=require(160)
-},{}],171:[function(require,module,exports){
+},{"lerp":312,"smoothstep":313}],312:[function(require,module,exports){
+module.exports=require(166)
+},{}],313:[function(require,module,exports){
 module.exports = function smoothstep (min, max, value) {
   var x = Math.max(0, Math.min(1, (value-min)/(max-min)));
   return x*x*(3 - 2*x);
 };
 
-},{}],172:[function(require,module,exports){
+},{}],314:[function(require,module,exports){
 /*
  * A fast javascript implementation of simplex noise by Jonas Wagner
  *
@@ -9922,7 +13734,7 @@ if (typeof module !== 'undefined') {
 
 })();
 
-},{}],173:[function(require,module,exports){
+},{}],315:[function(require,module,exports){
 var resolve = require('soundcloud-resolve')
 var fonts = require('google-fonts')
 var minstache = require('minstache')
@@ -9987,7 +13799,7 @@ function badge(options, callback) {
   return div
 }
 
-},{"fs":191,"google-fonts":174,"insert-css":175,"minstache":176,"soundcloud-resolve":177}],174:[function(require,module,exports){
+},{"fs":333,"google-fonts":316,"insert-css":317,"minstache":318,"soundcloud-resolve":319}],316:[function(require,module,exports){
 module.exports = asString
 module.exports.add = append
 
@@ -10027,7 +13839,7 @@ function makeArray(arr) {
   return Array.isArray(arr) ? arr : [arr]
 }
 
-},{}],175:[function(require,module,exports){
+},{}],317:[function(require,module,exports){
 var inserted = [];
 
 module.exports = function (css) {
@@ -10046,7 +13858,7 @@ module.exports = function (css) {
     }
 };
 
-},{}],176:[function(require,module,exports){
+},{}],318:[function(require,module,exports){
 
 /**
  * Expose `render()`.`
@@ -10197,7 +14009,7 @@ function escape(html) {
     .replace(/>/g, '&gt;');
 }
 
-},{}],177:[function(require,module,exports){
+},{}],319:[function(require,module,exports){
 var qs  = require('querystring')
 var xhr = require('xhr')
 
@@ -10226,7 +14038,7 @@ function resolve(id, goal, callback) {
   })
 }
 
-},{"querystring":199,"xhr":178}],178:[function(require,module,exports){
+},{"querystring":342,"xhr":320}],320:[function(require,module,exports){
 var window = require("global/window")
 var once = require("once")
 
@@ -10332,7 +14144,7 @@ function createXHR(options, callback) {
 
 function noop() {}
 
-},{"global/window":179,"once":180}],179:[function(require,module,exports){
+},{"global/window":321,"once":322}],321:[function(require,module,exports){
 (function (global){
 if (typeof window !== "undefined") {
     module.exports = window
@@ -10343,7 +14155,7 @@ if (typeof window !== "undefined") {
 }
 
 }).call(this,typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{}],180:[function(require,module,exports){
+},{}],322:[function(require,module,exports){
 module.exports = once
 
 once.proto = once(function () {
@@ -10364,7 +14176,7 @@ function once (fn) {
   }
 }
 
-},{}],181:[function(require,module,exports){
+},{}],323:[function(require,module,exports){
 /**
 
 ### `add(vec, other[, ...])`
@@ -10400,7 +14212,7 @@ var add = require('vectors/add')(2, { scalars: false })
 
 module.exports = require('./lib/operator')('add', '+')
 
-},{"./lib/operator":182}],182:[function(require,module,exports){
+},{"./lib/operator":324}],324:[function(require,module,exports){
 module.exports = operator
 
 function operator(name, op) {
@@ -10444,7 +14256,7 @@ function operator(name, op) {
   }
 }
 
-},{}],183:[function(require,module,exports){
+},{}],325:[function(require,module,exports){
 /**
 
 ### `mult(vec, other[, ...])`
@@ -10476,7 +14288,7 @@ var sub = require('vectors/mult')(2, { vectors: false })
 
 module.exports = require('./lib/operator')('mult', '*')
 
-},{"./lib/operator":182}],184:[function(require,module,exports){
+},{"./lib/operator":324}],326:[function(require,module,exports){
 module.exports = normalize
 
 function normalize(vec) {
@@ -10498,7 +14310,7 @@ function normalize(vec) {
   return vec
 }
 
-},{}],185:[function(require,module,exports){
+},{}],327:[function(require,module,exports){
 /**
 
 ### `normalize(vec, scalar)`
@@ -10545,7 +14357,7 @@ function generator(dims) {
   return Function(body.join('\n'))()
 }
 
-},{}],186:[function(require,module,exports){
+},{}],328:[function(require,module,exports){
 /**
 
 ### `sub(vec, other[, ...])`
@@ -10581,7 +14393,7 @@ var sub = require('vectors/sub')(2, { scalars: false })
 
 module.exports = require('./lib/operator')('sub', '-')
 
-},{"./lib/operator":182}],187:[function(require,module,exports){
+},{"./lib/operator":324}],329:[function(require,module,exports){
 var AudioContext = window.AudioContext || window.webkitAudioContext
 
 module.exports = WebAudioAnalyser
@@ -10661,7 +14473,7 @@ WebAudioAnalyser.prototype.frequencies = function(output, channel) {
   return output
 }
 
-},{}],188:[function(require,module,exports){
+},{}],330:[function(require,module,exports){
 var number = require('as-number')
 var rnd = require('./random')
 
@@ -10687,7 +14499,7 @@ Particle.prototype.scramble = function(width, height) {
 }
 
 
-},{"./random":190,"as-number":6}],189:[function(require,module,exports){
+},{"./random":332,"as-number":9}],331:[function(require,module,exports){
 var mixes = require('mixes')
 var number = require('as-number')
 var Particle = require('./Particle')
@@ -10810,15 +14622,15 @@ mixes(Particles, {
 })
 
 module.exports = Particles
-},{"./Particle":188,"./random":190,"as-number":6,"delaunay-triangulate":26,"mixes":161,"simplex-sampler":164,"vectors/add":181,"vectors/mult":183,"vectors/normalize":185,"vectors/sub":186}],190:[function(require,module,exports){
+},{"./Particle":330,"./random":332,"as-number":9,"delaunay-triangulate":29,"mixes":303,"simplex-sampler":306,"vectors/add":323,"vectors/mult":325,"vectors/normalize":327,"vectors/sub":328}],332:[function(require,module,exports){
 function random(start, end) {
     return start + Math.random() * (end - start)
 }
 
 module.exports = random
-},{}],191:[function(require,module,exports){
+},{}],333:[function(require,module,exports){
 
-},{}],192:[function(require,module,exports){
+},{}],334:[function(require,module,exports){
 /*!
  * The buffer module from node.js, for the browser.
  *
@@ -11989,7 +15801,7 @@ function assert (test, message) {
   if (!test) throw new Error(message || 'Failed assertion')
 }
 
-},{"base64-js":193,"ieee754":194}],193:[function(require,module,exports){
+},{"base64-js":335,"ieee754":336}],335:[function(require,module,exports){
 var lookup = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 
 ;(function (exports) {
@@ -12111,7 +15923,7 @@ var lookup = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 	exports.fromByteArray = uint8ToBase64
 }(typeof exports === 'undefined' ? (this.base64js = {}) : exports))
 
-},{}],194:[function(require,module,exports){
+},{}],336:[function(require,module,exports){
 exports.read = function(buffer, offset, isLE, mLen, nBytes) {
   var e, m,
       eLen = nBytes * 8 - mLen - 1,
@@ -12197,9 +16009,314 @@ exports.write = function(buffer, value, offset, isLE, mLen, nBytes) {
   buffer[offset + i - d] |= s * 128;
 };
 
-},{}],195:[function(require,module,exports){
-module.exports=require(140)
-},{}],196:[function(require,module,exports){
+},{}],337:[function(require,module,exports){
+// Copyright Joyent, Inc. and other Node contributors.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a
+// copy of this software and associated documentation files (the
+// "Software"), to deal in the Software without restriction, including
+// without limitation the rights to use, copy, modify, merge, publish,
+// distribute, sublicense, and/or sell copies of the Software, and to permit
+// persons to whom the Software is furnished to do so, subject to the
+// following conditions:
+//
+// The above copyright notice and this permission notice shall be included
+// in all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+// OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+// MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+// NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+// DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+// USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+function EventEmitter() {
+  this._events = this._events || {};
+  this._maxListeners = this._maxListeners || undefined;
+}
+module.exports = EventEmitter;
+
+// Backwards-compat with node 0.10.x
+EventEmitter.EventEmitter = EventEmitter;
+
+EventEmitter.prototype._events = undefined;
+EventEmitter.prototype._maxListeners = undefined;
+
+// By default EventEmitters will print a warning if more than 10 listeners are
+// added to it. This is a useful default which helps finding memory leaks.
+EventEmitter.defaultMaxListeners = 10;
+
+// Obviously not all Emitters should be limited to 10. This function allows
+// that to be increased. Set to zero for unlimited.
+EventEmitter.prototype.setMaxListeners = function(n) {
+  if (!isNumber(n) || n < 0 || isNaN(n))
+    throw TypeError('n must be a positive number');
+  this._maxListeners = n;
+  return this;
+};
+
+EventEmitter.prototype.emit = function(type) {
+  var er, handler, len, args, i, listeners;
+
+  if (!this._events)
+    this._events = {};
+
+  // If there is no 'error' event listener then throw.
+  if (type === 'error') {
+    if (!this._events.error ||
+        (isObject(this._events.error) && !this._events.error.length)) {
+      er = arguments[1];
+      if (er instanceof Error) {
+        throw er; // Unhandled 'error' event
+      } else {
+        throw TypeError('Uncaught, unspecified "error" event.');
+      }
+      return false;
+    }
+  }
+
+  handler = this._events[type];
+
+  if (isUndefined(handler))
+    return false;
+
+  if (isFunction(handler)) {
+    switch (arguments.length) {
+      // fast cases
+      case 1:
+        handler.call(this);
+        break;
+      case 2:
+        handler.call(this, arguments[1]);
+        break;
+      case 3:
+        handler.call(this, arguments[1], arguments[2]);
+        break;
+      // slower
+      default:
+        len = arguments.length;
+        args = new Array(len - 1);
+        for (i = 1; i < len; i++)
+          args[i - 1] = arguments[i];
+        handler.apply(this, args);
+    }
+  } else if (isObject(handler)) {
+    len = arguments.length;
+    args = new Array(len - 1);
+    for (i = 1; i < len; i++)
+      args[i - 1] = arguments[i];
+
+    listeners = handler.slice();
+    len = listeners.length;
+    for (i = 0; i < len; i++)
+      listeners[i].apply(this, args);
+  }
+
+  return true;
+};
+
+EventEmitter.prototype.addListener = function(type, listener) {
+  var m;
+
+  if (!isFunction(listener))
+    throw TypeError('listener must be a function');
+
+  if (!this._events)
+    this._events = {};
+
+  // To avoid recursion in the case that type === "newListener"! Before
+  // adding it to the listeners, first emit "newListener".
+  if (this._events.newListener)
+    this.emit('newListener', type,
+              isFunction(listener.listener) ?
+              listener.listener : listener);
+
+  if (!this._events[type])
+    // Optimize the case of one listener. Don't need the extra array object.
+    this._events[type] = listener;
+  else if (isObject(this._events[type]))
+    // If we've already got an array, just append.
+    this._events[type].push(listener);
+  else
+    // Adding the second element, need to change to array.
+    this._events[type] = [this._events[type], listener];
+
+  // Check for listener leak
+  if (isObject(this._events[type]) && !this._events[type].warned) {
+    var m;
+    if (!isUndefined(this._maxListeners)) {
+      m = this._maxListeners;
+    } else {
+      m = EventEmitter.defaultMaxListeners;
+    }
+
+    if (m && m > 0 && this._events[type].length > m) {
+      this._events[type].warned = true;
+      console.error('(node) warning: possible EventEmitter memory ' +
+                    'leak detected. %d listeners added. ' +
+                    'Use emitter.setMaxListeners() to increase limit.',
+                    this._events[type].length);
+      if (typeof console.trace === 'function') {
+        // not supported in IE 10
+        console.trace();
+      }
+    }
+  }
+
+  return this;
+};
+
+EventEmitter.prototype.on = EventEmitter.prototype.addListener;
+
+EventEmitter.prototype.once = function(type, listener) {
+  if (!isFunction(listener))
+    throw TypeError('listener must be a function');
+
+  var fired = false;
+
+  function g() {
+    this.removeListener(type, g);
+
+    if (!fired) {
+      fired = true;
+      listener.apply(this, arguments);
+    }
+  }
+
+  g.listener = listener;
+  this.on(type, g);
+
+  return this;
+};
+
+// emits a 'removeListener' event iff the listener was removed
+EventEmitter.prototype.removeListener = function(type, listener) {
+  var list, position, length, i;
+
+  if (!isFunction(listener))
+    throw TypeError('listener must be a function');
+
+  if (!this._events || !this._events[type])
+    return this;
+
+  list = this._events[type];
+  length = list.length;
+  position = -1;
+
+  if (list === listener ||
+      (isFunction(list.listener) && list.listener === listener)) {
+    delete this._events[type];
+    if (this._events.removeListener)
+      this.emit('removeListener', type, listener);
+
+  } else if (isObject(list)) {
+    for (i = length; i-- > 0;) {
+      if (list[i] === listener ||
+          (list[i].listener && list[i].listener === listener)) {
+        position = i;
+        break;
+      }
+    }
+
+    if (position < 0)
+      return this;
+
+    if (list.length === 1) {
+      list.length = 0;
+      delete this._events[type];
+    } else {
+      list.splice(position, 1);
+    }
+
+    if (this._events.removeListener)
+      this.emit('removeListener', type, listener);
+  }
+
+  return this;
+};
+
+EventEmitter.prototype.removeAllListeners = function(type) {
+  var key, listeners;
+
+  if (!this._events)
+    return this;
+
+  // not listening for removeListener, no need to emit
+  if (!this._events.removeListener) {
+    if (arguments.length === 0)
+      this._events = {};
+    else if (this._events[type])
+      delete this._events[type];
+    return this;
+  }
+
+  // emit removeListener for all listeners on all events
+  if (arguments.length === 0) {
+    for (key in this._events) {
+      if (key === 'removeListener') continue;
+      this.removeAllListeners(key);
+    }
+    this.removeAllListeners('removeListener');
+    this._events = {};
+    return this;
+  }
+
+  listeners = this._events[type];
+
+  if (isFunction(listeners)) {
+    this.removeListener(type, listeners);
+  } else {
+    // LIFO order
+    while (listeners.length)
+      this.removeListener(type, listeners[listeners.length - 1]);
+  }
+  delete this._events[type];
+
+  return this;
+};
+
+EventEmitter.prototype.listeners = function(type) {
+  var ret;
+  if (!this._events || !this._events[type])
+    ret = [];
+  else if (isFunction(this._events[type]))
+    ret = [this._events[type]];
+  else
+    ret = this._events[type].slice();
+  return ret;
+};
+
+EventEmitter.listenerCount = function(emitter, type) {
+  var ret;
+  if (!emitter._events || !emitter._events[type])
+    ret = 0;
+  else if (isFunction(emitter._events[type]))
+    ret = 1;
+  else
+    ret = emitter._events[type].length;
+  return ret;
+};
+
+function isFunction(arg) {
+  return typeof arg === 'function';
+}
+
+function isNumber(arg) {
+  return typeof arg === 'number';
+}
+
+function isObject(arg) {
+  return typeof arg === 'object' && arg !== null;
+}
+
+function isUndefined(arg) {
+  return arg === void 0;
+}
+
+},{}],338:[function(require,module,exports){
+module.exports=require(143)
+},{}],339:[function(require,module,exports){
 // shim for using process in browser
 
 var process = module.exports = {};
@@ -12264,7 +16381,7 @@ process.chdir = function (dir) {
     throw new Error('process.chdir is not supported');
 };
 
-},{}],197:[function(require,module,exports){
+},{}],340:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -12350,7 +16467,7 @@ var isArray = Array.isArray || function (xs) {
   return Object.prototype.toString.call(xs) === '[object Array]';
 };
 
-},{}],198:[function(require,module,exports){
+},{}],341:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -12437,20 +16554,20 @@ var objectKeys = Object.keys || function (obj) {
   return res;
 };
 
-},{}],199:[function(require,module,exports){
+},{}],342:[function(require,module,exports){
 'use strict';
 
 exports.decode = exports.parse = require('./decode');
 exports.encode = exports.stringify = require('./encode');
 
-},{"./decode":197,"./encode":198}],200:[function(require,module,exports){
+},{"./decode":340,"./encode":341}],343:[function(require,module,exports){
 module.exports = function isBuffer(arg) {
   return arg && typeof arg === 'object'
     && typeof arg.copy === 'function'
     && typeof arg.fill === 'function'
     && typeof arg.readUInt8 === 'function';
 }
-},{}],201:[function(require,module,exports){
+},{}],344:[function(require,module,exports){
 (function (process,global){
 // Copyright Joyent, Inc. and other Node contributors.
 //
@@ -13040,4 +17157,4 @@ function hasOwnProperty(obj, prop) {
 }
 
 }).call(this,require("sycGbZ"),typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"./support/isBuffer":200,"inherits":195,"sycGbZ":196}]},{},[3])
+},{"./support/isBuffer":343,"inherits":338,"sycGbZ":339}]},{},[6])

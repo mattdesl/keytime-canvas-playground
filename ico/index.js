@@ -11,7 +11,15 @@ var AudioViz = require('../audio-react/visualize')
 
 var lerp = require('lerp')
 
-var bg, sphere, particles, audioReact
+var bg,
+    sphere,
+    particles,
+    audioReact,
+    animations = {},
+    audioNode,
+    editor
+
+
 var time = 0
 
 function render(gl, width, height, dt) {
@@ -26,14 +34,23 @@ function render(gl, width, height, dt) {
     if (audioReact) {
         var reaction = audioReact()
 
-        var s1 = lerp(0.5, 1.0, reaction.value(0)),
-            s2 = lerp(0.5, 1.0, reaction.value(reaction.count - 1))
-        sphere.innerScale = [s1, s1, s1]
-        sphere.outerScale = [s2, s2, s2]
-        sphere.draw(width, height, dt)
+        var innerAmt = animations.innerSphere.audio,
+            outerAmt = animations.outerSphere.audio
 
-        var s3 = lerp(0.5, 4, reaction.value(reaction.count - 1))
+        var innerScale = lerp(0.5, 1.0, reaction.value(0) * innerAmt),
+            outerScale = lerp(0.5, 1.0, reaction.value(reaction.count - 1) * outerAmt),
+            s3 = lerp(0.5, 4, reaction.value(reaction.count - 1))
+
+        innerScale *= animations.innerSphere.scale
+        outerScale *= animations.outerSphere.scale
+
+        sphere.innerScale = [innerScale, innerScale, innerScale]
+        sphere.outerScale = [outerScale, outerScale, outerScale]
+
         particles.scale = s3
+
+        sphere.innerRotation = animations.innerSphere.rotation
+        sphere.draw(width, height, dt)
     }
 }
 
@@ -75,16 +92,69 @@ function start(gl, width, height) {
         dark: false,
         getFonts: true,
         audible: true,
+        loop: false,
         stereo: false
-    }, function(err, react) {
+    }, function(err, react, audio, analyser) {
         if (err) {
             sphere.scale = [1, 1, 1]
             particles.scale = 1
-        } else
+        } else {
             audioReact = react
+            audioNode = audio
+            editor.duration = audio.duration
+        }
+        editor.run()
+        // editor.show()
     })
+
+
+    ensureScheme(animData, require('./anim'))
+    update(0)
+    setupEditor()
 }
 
 events.on(window, 'touchstart', function(ev) {
     ev.preventDefault()
 })
+
+
+var createEditor = require('keytime-basic-editor')
+var createTimeline = require('keytime')
+var animData = require('./anim-data.json')
+var ensureScheme = require('../animation-scheme')
+
+function setupEditor() {
+    editor = createEditor(update, {
+        // duration: 233
+    })
+
+    // editor.shy('color')
+    editor.constraint(['rotation'], { min: -Math.PI*2, max: Math.PI*2, step: 0.05, decimals: 2 })
+    editor.constraint(['scale'], { min: 0, max: 4, step: 0.05, decimals: 2 })
+    editor.constraint(['audio'], { min: 0, max: 1, step: 0.05, decimals: 2 })
+    editor.constraint('color', { min: 0, max: 255, step: 1 })
+    editor.constraint('angle', { min: 0, max: 2, decimals: 0 })
+
+    animData.forEach(function(a) {
+        editor.add(a.timeline, a.name)
+    })
+
+    editor.on('play', function() {
+        audioNode.currentTime = editor.playhead()
+        audioNode.play()
+    })
+    editor.on('pause', function() {
+        audioNode.pause()
+    })
+
+    editor.appendTo(document.body)
+    editor.hide()
+}
+
+function update(time) {
+    animData.forEach(function(a) {
+        if (!animations[a.name])
+            animations[a.name] = {}
+        a.timeline.values(time, animations[a.name])
+    })
+}

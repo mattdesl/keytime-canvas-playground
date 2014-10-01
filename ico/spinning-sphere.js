@@ -39,6 +39,7 @@ function Sphere(gl, opt) {
     this.spin = mat4.create()
     this.projection = mat4.create()
 
+    this.innerRotation = [0,0,0]
     this.innerScale = [1,1,1]
     this.outerScale = [1,1,1]
 
@@ -67,7 +68,12 @@ Sphere.prototype.draw = function(width, height, dt) {
     mat4.rotateY(view, view, dt / 1000 * 0.25)
 
     //also rotate the transform a little bit more
-    mat4.rotateY(spin, spin, dt / 1000 * 0.5)
+    // mat4.rotateY(spin, spin, dt / 1000 * 0.5)
+    mat4.identity(spin)
+    var innerRotation = this.innerRotation
+    mat4.rotateX(spin, spin, innerRotation[0])
+    mat4.rotateY(spin, spin, innerRotation[1])
+    mat4.rotateZ(spin, spin, innerRotation[2])
 
     shader.bind()
     shader.uniforms.view = view

@@ -1,6 +1,6 @@
 var Analyse = require('web-audio-analyser')
 var Reaction = require('./')
-
+var events = require('dom-events')
 
 var noop = function(){}
 
@@ -13,11 +13,11 @@ module.exports = function(opt, callback) {
 			return
 		}
 		var audio = new Audio()
-		audio.addEventListener('error', function(e) {
+		events.once(audio, 'error', function(e) {
 			callback(e)
 			callback = noop
 		})
-		audio.addEventListener('canplay', function() {
+		events.once(audio, 'canplay', function() {
 			audio.play()
 			analyser = Analyse(audio, opt)
 			reaction = Reaction(opt)
@@ -25,7 +25,7 @@ module.exports = function(opt, callback) {
 				var frequencies = analyser.frequencies()
 				reaction.update(frequencies)
 				return reaction
-			})
+			}, audio, analyser)
 			callback = noop
 		})
 		audio.src = url
