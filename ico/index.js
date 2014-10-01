@@ -1,4 +1,6 @@
-require('canvas-testbed')(render, start, { context: 'webgl' })
+require('canvas-testbed')(render, start, {
+    context: 'webgl'
+})
 
 var Vignette = require('gl-vignette-background')
 var Sphere = require('./spinning-sphere')
@@ -14,12 +16,10 @@ var time = 0
 
 function render(gl, width, height, dt) {
     time += dt
-	gl.clear(gl.COLOR_BUFFER_BIT)
-	gl.clearColor(0,0,0,1)
-	
-	bg.draw()
+    gl.clear(gl.COLOR_BUFFER_BIT)
+    gl.clearColor(0, 0, 0, 1)
 
-
+    bg.draw()
 
     particles.draw(width, height, dt)
 
@@ -27,30 +27,30 @@ function render(gl, width, height, dt) {
         var reaction = audioReact()
 
         var s1 = lerp(0.5, 1.0, reaction.value(0)),
-            s2 = lerp(0.5, 1.0, reaction.value(reaction.count-1))
-        sphere.innerScale = [s1,s1,s1]
-        sphere.outerScale = [s2,s2,s2]
+            s2 = lerp(0.5, 1.0, reaction.value(reaction.count - 1))
+        sphere.innerScale = [s1, s1, s1]
+        sphere.outerScale = [s2, s2, s2]
         sphere.draw(width, height, dt)
 
-        var s3 = lerp(0.5, 4, reaction.value(reaction.count-1))
+        var s3 = lerp(0.5, 4, reaction.value(reaction.count - 1))
         particles.scale = s3
     }
 }
 
 function start(gl, width, height) {
-	var radius = Math.max(width, height) * 0.6
-	bg = Vignette(gl, {
-        scale: [ 1/width * radius, 1/height * radius],
+    var radius = Math.max(width, height) * 0.6
+    bg = Vignette(gl, {
+        scale: [1 / width * radius, 1 / height * radius],
         aspect: 1,
         color2: [0, 0, 0],
-        color1: [30/255, 46/255, 58/255],
-        smoothing: [ -0.5, 1.0 ],
+        color1: [30 / 255, 46 / 255, 58 / 255],
+        smoothing: [-0.5, 1.0],
         noiseAlpha: 0.2,
     })
 
     var basicShader = BasicShader(gl)
 
-	sphere = Sphere(gl, {
+    sphere = Sphere(gl, {
         shader: basicShader
     })
 
@@ -59,7 +59,7 @@ function start(gl, width, height) {
         noiseScale: 0.5,
         speed: 0.3,
         driftSpeed: 0.03,
-        width: width, 
+        width: width,
         height: height
     })
 
@@ -75,12 +75,12 @@ function start(gl, width, height) {
         dark: false,
         getFonts: true,
         audible: true,
-        stereo: false   
+        stereo: false
     }, function(err, react) {
         if (err) {
             sphere.scale = [1, 1, 1]
             particles.scale = 1
-        } else 
+        } else
             audioReact = react
     })
 }
