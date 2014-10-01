@@ -30,7 +30,9 @@
     "inherits": "^2.0.1",
     "lerp": "^1.0.0",
     "premultiplied-rgba": "^1.0.0",
-    "vectors": "^0.1.0"
+    "soundcloud-badge": "0.0.0",
+    "vectors": "^0.1.0",
+    "web-audio-analyser": "^2.0.0"
   },
   "devDependencies": {
     "tape": "~2.13.2"

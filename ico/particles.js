@@ -43,6 +43,7 @@ Particles.prototype.draw = function(width, height, dt) {
 	Base.prototype.update.call(this, width, height, dt)
 	mat4.ortho(this.projection, 0, width, height, 0, 0, 1)
 
+
 	this.texture.bind()
 	this.shader.bind()
 	this.shader.uniforms.projection = this.projection

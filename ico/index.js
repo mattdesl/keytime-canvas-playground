@@ -5,8 +5,11 @@ var Sphere = require('./spinning-sphere')
 var Particles = require('./particles')
 var BasicShader = require('gl-basic-shader')
 var events = require('dom-events')
+var AudioViz = require('../audio-react/visualize')
 
-var bg, sphere, particles
+var lerp = require('lerp')
+
+var bg, sphere, particles, audioReact
 var time = 0
 
 function render(gl, width, height, dt) {
@@ -15,9 +18,23 @@ function render(gl, width, height, dt) {
 	gl.clearColor(0,0,0,1)
 	
 	bg.draw()
+
+
+
     particles.draw(width, height, dt)
 
-    sphere.draw(width, height, dt)
+    if (audioReact) {
+        var reaction = audioReact()
+
+        var s1 = lerp(0.5, 1.0, reaction.value(0)),
+            s2 = lerp(0.5, 1.0, reaction.value(reaction.count-1))
+        sphere.innerScale = [s1,s1,s1]
+        sphere.outerScale = [s2,s2,s2]
+        sphere.draw(width, height, dt)
+
+        var s3 = lerp(0.5, 4, reaction.value(reaction.count-1))
+        particles.scale = s3
+    }
 }
 
 function start(gl, width, height) {
@@ -45,8 +62,28 @@ function start(gl, width, height) {
         width: width, 
         height: height
     })
-}
 
+    sphere.scale = [0, 0, 0]
+    particles.scale = 0
+
+    AudioViz({
+        count: 16,
+        low: 80,
+        high: 150,
+        client_id: '408617707914e767ff6e955669a1c4a8',
+        song: 'https://soundcloud.com/ursula1000/01-kinda-kinky',
+        dark: false,
+        getFonts: true,
+        audible: true,
+        stereo: false   
+    }, function(err, react) {
+        if (err) {
+            sphere.scale = [1, 1, 1]
+            particles.scale = 1
+        } else 
+            audioReact = react
+    })
+}
 
 events.on(window, 'touchstart', function(ev) {
     ev.preventDefault()

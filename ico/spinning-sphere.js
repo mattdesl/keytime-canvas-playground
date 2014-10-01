@@ -6,7 +6,7 @@ var Wire = require('gl-wireframe')
 var mat4 = require('gl-mat4')
 var premult = require('premultiplied-rgba')
 
-var identity = mat4.identity(mat4.create())
+var scaleMat = mat4.create()
 var tmp4 = [0, 0, 0, 0]
 
 module.exports = Sphere
@@ -39,6 +39,9 @@ function Sphere(gl, opt) {
     this.spin = mat4.create()
     this.projection = mat4.create()
 
+    this.innerScale = [1,1,1]
+    this.outerScale = [1,1,1]
+
     this.innerColor = opt.innerColor || [1, 0, 0, 0.1]
     this.strokeColor = opt.strokeColor || [1, 0, 0, 0.5]
     this.outerColor = opt.outerColor || [1, 1, 1, 0.05]
@@ -70,20 +73,32 @@ Sphere.prototype.draw = function(width, height, dt) {
     shader.uniforms.view = view
     shader.uniforms.projection = projection
 
+    //scale the outer sphere 
+    mat4.identity(scaleMat)
+    mat4.scale(scaleMat, scaleMat, this.outerScale)
+
+    //draw the outer sphere
     highpoly.bind(shader)
-    shader.uniforms.model = identity
+    shader.uniforms.model = scaleMat
     shader.uniforms.tint = premult(this.outerColor, tmp4)
     highpoly.draw(gl.LINES)
     highpoly.unbind()
 
-    //bind the mesh and its associated shader
+    //scale the inner sphere
+    mat4.identity(scaleMat)
+    mat4.scale(scaleMat, spin, this.innerScale)
+
+    //draw the inner sphere
     lowpoly.bind(shader)
-    shader.uniforms.model = spin
+    shader.uniforms.model = scaleMat
+
     //draw opaque
     shader.uniforms.tint = premult(this.innerColor, tmp4)
     lowpoly.draw(gl.TRIANGLES)
+    
     //draw lines
     shader.uniforms.tint = premult(this.strokeColor, tmp4)
     lowpoly.draw(gl.LINES)
+    
     lowpoly.unbind()
 }
