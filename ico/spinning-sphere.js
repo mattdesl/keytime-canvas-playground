@@ -6,66 +6,67 @@ var Wire = require('gl-wireframe')
 var mat4 = require('gl-mat4')
 var premult = require('premultiplied-rgba')
 
-var identity = mat4.identity( mat4.create() )
-var tmp4 = [0,0,0,0]
+var identity = mat4.identity(mat4.create())
+var tmp4 = [0, 0, 0, 0]
 
 module.exports = Sphere
+
 function Sphere(gl, opt) {
-	if (!(this instanceof Sphere)) 
-		return new Sphere(gl, opt)
-	opt = opt||{}
-	this.shader = opt.shader || defaultShader(gl)
-	this.gl = gl
+    if (!(this instanceof Sphere))
+        return new Sphere(gl, opt)
+    opt = opt || {}
+    this.shader = opt.shader || defaultShader(gl)
+    this.gl = gl
 
 
-	var complex = Icosphere(1)
+    var complex = Icosphere(1)
 
-	this.highpoly = Geom(gl)
-		.attr('position', complex.positions)
-		.faces(Wire(complex.cells))
+    this.highpoly = Geom(gl)
+        .attr('position', complex.positions)
+        .faces(Wire(complex.cells))
 
-	complex = Icosphere(0)
-	this.lowpoly = Geom(gl)
-		.attr('position', complex)
-		.faces(complex)
+    complex = Icosphere(0)
+    this.lowpoly = Geom(gl)
+        .attr('position', complex)
+        .faces(complex)
 
     //and a view matrix
     var view = mat4.create()
     mat4.translate(view, view, [0, 0, -20])
     mat4.scale(view, view, [1, -1, 1])
-    
+
     this.view = view
     this.spin = mat4.create()
     this.projection = mat4.create()
 
-    this.innerColor = opt.innerColor || [1,0,0,0.1]
-    this.strokeColor = opt.strokeColor || [1,0,0,0.5]
-    this.outerColor = opt.outerColor || [1,1,1,0.05]
+    this.innerColor = opt.innerColor || [1, 0, 0, 0.1]
+    this.strokeColor = opt.strokeColor || [1, 0, 0, 0.5]
+    this.outerColor = opt.outerColor || [1, 1, 1, 0.05]
 }
 
 Sphere.prototype.draw = function(width, height, dt) {
-	var shader = this.shader,
-		gl = this.gl,
-		view = this.view,
-		spin = this.spin,
-		projection = this.projection,
-		highpoly = this.highpoly,
-		lowpoly = this.lowpoly
+    var shader = this.shader,
+        gl = this.gl,
+        view = this.view,
+        spin = this.spin,
+        projection = this.projection,
+        highpoly = this.highpoly,
+        lowpoly = this.lowpoly
 
-	gl.enable(gl.BLEND)
-	gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
+    gl.enable(gl.BLEND)
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
     gl.lineWidth(3)
 
-	mat4.perspective(projection, 50, width/height, 1, 1000)
+    mat4.perspective(projection, 50, width / height, 1, 1000)
 
     //rotate our view transform
-    mat4.rotateX(view, view, dt/1000 * 0.5)
-    mat4.rotateY(view, view, dt/1000 * 0.25)
+    mat4.rotateX(view, view, dt / 1000 * 0.5)
+    mat4.rotateY(view, view, dt / 1000 * 0.25)
 
     //also rotate the transform a little bit more
-    mat4.rotateY(spin, spin, dt/1000 * 0.5)
+    mat4.rotateY(spin, spin, dt / 1000 * 0.5)
 
-	shader.bind()
+    shader.bind()
     shader.uniforms.view = view
     shader.uniforms.projection = projection
 
@@ -75,8 +76,8 @@ Sphere.prototype.draw = function(width, height, dt) {
     highpoly.draw(gl.LINES)
     highpoly.unbind()
 
-	//bind the mesh and its associated shader
-	lowpoly.bind(shader)
+    //bind the mesh and its associated shader
+    lowpoly.bind(shader)
     shader.uniforms.model = spin
     //draw opaque
     shader.uniforms.tint = premult(this.innerColor, tmp4)
@@ -86,5 +87,3 @@ Sphere.prototype.draw = function(width, height, dt) {
     lowpoly.draw(gl.LINES)
     lowpoly.unbind()
 }
-
-

@@ -3,6 +3,8 @@ require('canvas-testbed')(render, start, { context: 'webgl' })
 var Vignette = require('gl-vignette-background')
 var Sphere = require('./spinning-sphere')
 var Particles = require('./particles')
+var BasicShader = require('gl-basic-shader')
+var events = require('dom-events')
 
 var bg, sphere, particles
 var time = 0
@@ -19,7 +21,7 @@ function render(gl, width, height, dt) {
 }
 
 function start(gl, width, height) {
-	var radius = Math.max(width, height) * 0.5
+	var radius = Math.max(width, height) * 0.6
 	bg = Vignette(gl, {
         scale: [ 1/width * radius, 1/height * radius],
         aspect: 1,
@@ -29,10 +31,14 @@ function start(gl, width, height) {
         noiseAlpha: 0.2,
     })
 
-	sphere = Sphere(gl)
+    var basicShader = BasicShader(gl)
+
+	sphere = Sphere(gl, {
+        shader: basicShader
+    })
 
     particles = Particles(gl, {
-        count: 80,
+        count: 50,
         noiseScale: 0.5,
         speed: 0.3,
         driftSpeed: 0.03,
@@ -40,3 +46,8 @@ function start(gl, width, height) {
         height: height
     })
 }
+
+
+events.on(window, 'touchstart', function(ev) {
+    ev.preventDefault()
+})

@@ -14,6 +14,7 @@
     "canvas-testbed": "^1.0.1",
     "color-style": "^1.0.0",
     "delaunay-triangulate": "^1.1.6",
+    "dom-events": "^0.1.1",
     "gl-basic-mesh": "^2.0.0",
     "gl-basic-shader": "^1.1.0",
     "gl-buffer": "^2.0.9",
@@ -36,7 +37,8 @@
   },
   "scripts": {
     "test": "node test.js",
-    "dev-ico": "beefy --live --index=./app/test.html ico/index.js"
+    "dev-ico": "beefy --live --index=./app/test.html ico/index.js",
+    "build-ico": "browserify ico/index > app/js/icosphere.js"
   },
   "repository": {
     "type": "git",
